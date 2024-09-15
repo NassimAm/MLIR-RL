@@ -1,9 +1,8 @@
-MyASTGenerator/build/bin
 .vscode
 .neptune
 jobs_logs
 models
 examples
 tmp_files
-__pycache__/
-utils/__pycache__/
+*__pycache__/
+MyASTGenerator/build/

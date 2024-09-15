@@ -1,4 +1,9 @@
 EXECUTABLE_PATH = "/scratch/nb3891/Script/MLIR_RL_2/MLScheduler/build/bin/CustomAutoSchedulerML"
+NEPTUNE_PROJECT_NAME = "nassimam/mlir-rl"
+NEPTUNE_API_KEY = "eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIzYWQ1NmJiZC05YmMyLTRkYzMtYTQ2ZC1kNWZjMGI0NmY1ZDYifQ=="
+OMP_BUILD_PATH = "/data/na3758/llvm-project/build"
+MLIR_BUILD_PATH = "/data/na3758/llvm-project/build-mlir"
+TMP_FILES_PATH = "tmp/"
 
 
 MAX_NUM_STORES_LOADS = 5 # the maximum number of loads in the nested loops

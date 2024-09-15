@@ -4,6 +4,8 @@ from utils.consts import (
     MAX_NUM_STORES_LOADS,
     MAX_NUM_LOOPS,
     MAX_NUM_LOAD_STORE_DIM,
+    NEPTUNE_API_KEY,
+    NEPTUNE_PROJECT_NAME,
     NUM_TILE_SIZES,
     NUM_TRANSFORMATIONS
 )
@@ -16,7 +18,8 @@ import neptune
 
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
 
 def print_info(*args):
     message = ' '.join(map(str, args))
@@ -40,8 +43,8 @@ print_info('Finish imports')
 def init_neptune(tags: list):
     tags = list(map(str, tags))
     run = neptune.init_run(
-        project="nazim-bendib/mlir-rl",
-        api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIxNDVjNWJkYi1mMTIwLTRmNDItODk3Mi03NTZiNzIzZGNhYzMifQ==",
+        project=NEPTUNE_PROJECT_NAME,
+        api_token=NEPTUNE_API_KEY,
         tags=tags,
         # mode="sync"
     ) 

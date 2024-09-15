@@ -1,4 +1,4 @@
-# Install script for directory: /scratch/nb3891/Script/MLIR_RL_2/MyASTGenerator
+# Install script for directory: /home/na3758/MLIR-RL/MyASTGenerator
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -39,7 +39,7 @@ endif()
 
 # Set default install directory permissions.
 if(NOT DEFINED CMAKE_OBJDUMP)
-  set(CMAKE_OBJDUMP "/home/nb3891/.conda/envs/main_env_5/bin/x86_64-conda-linux-gnu-objdump")
+  set(CMAKE_OBJDUMP "/usr/bin/objdump")
 endif()
 
 if(CMAKE_INSTALL_COMPONENT)
@@ -50,5 +50,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/scratch/nb3891/Script/MLIR_RL_2/MyASTGenerator/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/na3758/MLIR-RL/MyASTGenerator/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

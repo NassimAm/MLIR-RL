@@ -8,11 +8,11 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/scratch/nb3891/Script/MLIR_RL_2/MyASTGenerator/ast_dump.cpp" "CMakeFiles/AstDumper.dir/ast_dump.cpp.o" "gcc" "CMakeFiles/AstDumper.dir/ast_dump.cpp.o.d"
+  "/home/na3758/MLIR-RL/MyASTGenerator/ast_dump.cpp" "CMakeFiles/AstDumper.dir/ast_dump.cpp.o" "gcc" "CMakeFiles/AstDumper.dir/ast_dump.cpp.o.d"
   )
 
-# Targets to which this target links which contain Fortran sources.
-set(CMAKE_Fortran_TARGET_LINKED_INFO_FILES
+# Targets to which this target links.
+set(CMAKE_TARGET_LINKED_INFO_FILES
   )
 
 # Fortran module output directory.

@@ -6,6 +6,8 @@ from copy import copy
 from tqdm import tqdm
 import multiprocessing
 
+from utils.consts import MLIR_BUILD_PATH, OMP_BUILD_PATH
+
 
 
 
@@ -87,7 +89,7 @@ def transform_dialect_TP(code, operation_tag, tiling_size, tmp_file):
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
         
     result = result.replace("module {\n", "")
@@ -118,7 +120,7 @@ def transform_dialect_tile(code, operation_tag, tiling_size, tmp_file):
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()    
     
     result = result.replace("module {\n", "")
@@ -150,7 +152,7 @@ def transform_dialect_interchange(code, operation_tag, interchange_list, tmp_fil
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
     
     if not f'tag = "{operation_tag}"' in result:
@@ -179,7 +181,7 @@ def transform_dialect_fuse(code, consumer_tag, producer_tag, tmp_file):
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -test-transform-dialect-erase-schedule',
     ).read()
     
     result = result.replace("module {\n", "")
@@ -242,7 +244,7 @@ module attributes {{transform.with_named_sequence}} {{
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
     
     result = result.replace("module {\n", "")
@@ -300,7 +302,7 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
     
     result = result.replace("module {\n", "")
@@ -386,7 +388,7 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
     
     result = result.replace("module {\n", "")
@@ -430,7 +432,7 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
     
     result = result.replace("module {\n", "")
@@ -492,7 +494,7 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
     
     result = result.replace("module {\n", "")
@@ -506,8 +508,8 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
 
 
 def evaluate_code_2(code, tmp_file):
-    command_1 = """/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt  -loop-invariant-code-motion -cse -canonicalize -cse -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize="bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map" -buffer-deallocation -convert-linalg-to-loops  -scf-foreach-thread-lowering -convert-vector-to-scf -convert-scf-to-openmp -canonicalize -lower-affine -expand-strided-metadata -finalize-memref-to-llvm -convert-scf-to-cf -lower-affine -convert-arith-to-llvm -convert-openmp-to-llvm -convert-vector-to-llvm -convert-cf-to-llvm -convert-func-to-llvm -convert-math-to-llvm -reconcile-unrealized-casts"""
-    command_2 = """/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-cpu-runner -e main -entry-point-result=void -shared-libs=/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/lib/libmlir_runner_utils.so,/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/lib/libmlir_c_runner_utils.so,/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/lib/libomp.so"""
+    command_1 = f"""{MLIR_BUILD_PATH}/bin/mlir-opt  -loop-invariant-code-motion -cse -canonicalize -cse -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize="bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map" -buffer-deallocation -convert-linalg-to-loops  -scf-foreach-thread-lowering -convert-vector-to-scf -convert-scf-to-openmp -canonicalize -lower-affine -expand-strided-metadata -finalize-memref-to-llvm -convert-scf-to-cf -lower-affine -convert-arith-to-llvm -convert-openmp-to-llvm -convert-vector-to-llvm -convert-cf-to-llvm -convert-func-to-llvm -convert-math-to-llvm -reconcile-unrealized-casts"""
+    command_2 = f"""{MLIR_BUILD_PATH}/bin/mlir-cpu-runner -e main -entry-point-result=void -shared-libs={MLIR_BUILD_PATH}/lib/libmlir_runner_utils.so,{MLIR_BUILD_PATH}/lib/libmlir_c_runner_utils.so,{OMP_BUILD_PATH}/lib/libomp.so"""
         
     os.environ["OMP_NUM_THREADS"] = "8"
     
@@ -556,7 +558,7 @@ module attributes {{transform.with_named_sequence}} {{
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -test-transform-dialect-erase-schedule',
     ).read()
     
     
@@ -603,7 +605,7 @@ def apply_conv2d_decomposition(code, operation_tag, tmp_file):
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
     
     if not f'tag = "{operation_tag}"' in result:
@@ -644,7 +646,7 @@ def transform_dialect_prints(code, operation_tags: list, tmp_file):
         file.write(code)
     
     result = os.popen(
-        f'/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
+        f'{MLIR_BUILD_PATH}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule',
     ).read()
     
     result = result.replace("module {\n", "")
@@ -741,8 +743,8 @@ def apply_transformation_with_timeout(state, code, transformation, parameters, t
 
 
 def evaluate_code(code, tmp_file):
-    command_1 = """/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-opt  -loop-invariant-code-motion -cse -canonicalize -cse -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize="bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map" -buffer-deallocation -convert-linalg-to-loops  -scf-foreach-thread-lowering -convert-vector-to-scf -convert-scf-to-openmp -canonicalize -lower-affine -expand-strided-metadata -finalize-memref-to-llvm -convert-scf-to-cf -lower-affine -convert-arith-to-llvm -convert-openmp-to-llvm -convert-vector-to-llvm -convert-cf-to-llvm -convert-func-to-llvm -convert-math-to-llvm -reconcile-unrealized-casts"""
-    command_2 = """/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/bin/mlir-cpu-runner -e main -entry-point-result=void -shared-libs=/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/lib/libmlir_runner_utils.so,/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/lib/libmlir_c_runner_utils.so,/scratch/nb3891/Script/MLIR_RL_2/llvm-project/build/lib/libomp.so"""
+    command_1 = f"""{MLIR_BUILD_PATH}/bin/mlir-opt  -loop-invariant-code-motion -cse -canonicalize -cse -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize="bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map" -buffer-deallocation -convert-linalg-to-loops  -scf-foreach-thread-lowering -convert-vector-to-scf -convert-scf-to-openmp -canonicalize -lower-affine -expand-strided-metadata -finalize-memref-to-llvm -convert-scf-to-cf -lower-affine -convert-arith-to-llvm -convert-openmp-to-llvm -convert-vector-to-llvm -convert-cf-to-llvm -convert-func-to-llvm -convert-math-to-llvm -reconcile-unrealized-casts"""
+    command_2 = f"""{MLIR_BUILD_PATH}/bin/mlir-cpu-runner -e main -entry-point-result=void -shared-libs={MLIR_BUILD_PATH}/lib/libmlir_runner_utils.so,{MLIR_BUILD_PATH}/lib/libmlir_c_runner_utils.so,{OMP_BUILD_PATH}/lib/libomp.so"""
         
     os.environ["OMP_NUM_THREADS"] = "8"
     

@@ -19,7 +19,8 @@ from utils.consts import (
     MAX_NUM_LOOPS,
     INTERCHANGE_ACTIONS,
     NUM_TILE_SIZES,
-    NUM_TRANSFORMATIONS
+    NUM_TRANSFORMATIONS,
+    TMP_FILES_PATH
 )
 
 import torch
@@ -354,7 +355,7 @@ class Env:
         # This is done in order to enable having multiple experiments at the same time, by letting each
         # experiment use a separate unique file to read and write intermidiate representations
         random_str = generate_random_string()
-        tmp_file = "/scratch/nb3891/Script/MLIR_RL_2/tmp_files/" + random_str + ".txt"
+        tmp_file = TMP_FILES_PATH + random_str + ".txt"
         with open(tmp_file, "w") as file:
             file.write("")
         self.tmp_file = tmp_file
