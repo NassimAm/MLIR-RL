@@ -76,7 +76,8 @@ target_link_libraries(AstDumper
   
     MLIRMathToLLVM
     MLIRMemRefToLLVM
-    MLIRLinalgToLLVM
+    MLIRLinalgToStandard
+    MLIRFuncToLLVM
     MLIROpenMPToLLVM
     MLIRSCFToOpenMP
     MLIRBufferizationToMemRef

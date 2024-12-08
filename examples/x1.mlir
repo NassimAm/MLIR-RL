@@ -55,7 +55,7 @@
       %14 = arith.addf %13, %out : f32
       linalg.yield %14 : f32
     } -> tensor<32x729x128xf32>
-    %expanded = tensor.expand_shape %9 [[0], [1, 2], [3]] : tensor<32x729x128xf32> into tensor<32x27x27x128xf32>
+    %expanded = tensor.expand_shape %9 [[0], [1, 2], [3]] output_shape [32, 27, 27, 128] : tensor<32x729x128xf32> into tensor<32x27x27x128xf32>
     %10 = call @nanoTime() : () -> i64
     %11 = arith.subi %10, %6 : i64
     %12 = arith.uitofp %11 : i64 to f64
@@ -72,45 +72,45 @@
     return
   }
 
-module attributes {transform.with_named_sequence} {
-  transform.named_sequence @__transform_main(%variant_op: !transform.any_op {transform.readonly}) 
-{
+// module attributes {transform.with_named_sequence} {
+//   transform.named_sequence @__transform_main(%variant_op: !transform.any_op {transform.readonly}) 
+// {
 
 
-%cons = transform.structured.match attributes{consumerTag} in %variant_op : (!transform.any_op) -> !transform.any_op
+// %cons = transform.structured.match attributes{consumerTag} in %variant_op : (!transform.any_op) -> !transform.any_op
 
-   %conv_l1 , %forall_l1= transform.structured.tile_using_forall %cons tile_sizes [ 2,27]
-  : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+//    %conv_l1 , %forall_l1= transform.structured.tile_using_forall %cons tile_sizes [ 2,27]
+//   : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 
-%prod = transform.structured.match attributes{producerTag} in %variant_op : (!transform.any_op) -> !transform.any_op 
+// %prod = transform.structured.match attributes{producerTag} in %variant_op : (!transform.any_op) -> !transform.any_op 
 
-  transform.structured.fuse_into_containing_op %prod into %forall_l1
-    : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)
+//   transform.structured.fuse_into_containing_op %prod into %forall_l1
+//     : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)
 
-    %fb = transform.structured.match ops{["func.func"]} in %variant_op
-      : (!transform.any_op) -> !transform.any_op
-    transform.apply_patterns to %fb {
-      transform.apply_patterns.canonicalization
-    } : !transform.any_op
-    transform.apply_cse to %fb : !transform.any_op
+//     %fb = transform.structured.match ops{["func.func"]} in %variant_op
+//       : (!transform.any_op) -> !transform.any_op
+//     transform.apply_patterns to %fb {
+//       transform.apply_patterns.canonicalization
+//     } : !transform.any_op
+//     transform.apply_cse to %fb : !transform.any_op
 
-  %original_fill = transform.structured.match ops{["linalg.fill"]} in %variant_op
-    : (!transform.any_op) -> !transform.any_op
+//   %original_fill = transform.structured.match ops{["linalg.fill"]} in %variant_op
+//     : (!transform.any_op) -> !transform.any_op
 
-  transform.structured.fuse_into_containing_op %original_fill into %forall_l1
-    : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)
+//   transform.structured.fuse_into_containing_op %original_fill into %forall_l1
+//     : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)
 
-  %fb1 = transform.structured.match ops{["func.func"]} in %variant_op
-    : (!transform.any_op) -> !transform.any_op
-  transform.apply_patterns to %fb1 {
-    transform.apply_patterns.canonicalization
-  } : !transform.any_op
-  transform.apply_cse to %fb1 : !transform.any_op
+//   %fb1 = transform.structured.match ops{["func.func"]} in %variant_op
+//     : (!transform.any_op) -> !transform.any_op
+//   transform.apply_patterns to %fb1 {
+//     transform.apply_patterns.canonicalization
+//   } : !transform.any_op
+//   transform.apply_cse to %fb1 : !transform.any_op
 
-  %fb2 = transform.structured.match ops{["func.func"]} in %variant_op : (!transform.any_op) -> !transform.any_op
-  %2 = transform.structured.vectorize_children_and_apply_patterns %fb2  : (!transform.any_op) -> !transform.any_op
+//   %fb2 = transform.structured.match ops{["func.func"]} in %variant_op : (!transform.any_op) -> !transform.any_op
+//   %2 = transform.structured.vectorize_children_and_apply_patterns %fb2  : (!transform.any_op) -> !transform.any_op
 
 
-  transform.yield
-}
-}
+//   transform.yield
+// }
+// }

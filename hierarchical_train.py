@@ -1,3 +1,4 @@
+import os
 from utils.environment import ParallelEnv
 from utils.ppo_model import HiearchyModel as MyModel
 from utils.consts import (
@@ -15,8 +16,8 @@ from tqdm import tqdm
 import neptune
 
 
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 def print_info(*args):
     message = ' '.join(map(str, args))
@@ -40,11 +41,11 @@ print_info('Finish imports')
 def init_neptune(tags: list):
     tags = list(map(str, tags))
     run = neptune.init_run(
-        project="nazim-bendib/mlir-rl",
-        api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIxNDVjNWJkYi1mMTIwLTRmNDItODk3Mi03NTZiNzIzZGNhYzMifQ==",
+        project=os.getenv('NEPTUNE_PROJECT'),
+        api_token=os.getenv('NEPTUNE_TOKEN'),
         tags=tags,
         # mode="sync"
-    ) 
+    )
     return run
 
 
@@ -54,7 +55,7 @@ class Buffer:
         self.buffers = {}
 
     def add(self, key, element):
-        if not key in self.buffers:
+        if key not in self.buffers:
             self.buffers[key] = []
         if len(self.buffers[key]) < self.max_size:
             self.buffers[key].append(element)
@@ -64,7 +65,7 @@ class Buffer:
 
     def get_buffer(self, key):
         return self.buffers[key]
-    
+
     def mean(self, key):
         return sum(self.buffers[key]) / len(self.buffers[key])
 
@@ -78,11 +79,7 @@ class Buffer:
         return std
 
 
-
-
-
-
-def collect_trajectory(len_trajectory, model:MyModel, env:ParallelEnv, logs=False):
+def collect_trajectory(len_trajectory, model: MyModel, env: ParallelEnv, logs=False):
 
     batch_state, batch_obs = env.reset()
     batch_obs = [obs.to(device) for obs in batch_obs]
@@ -106,13 +103,11 @@ def collect_trajectory(len_trajectory, model:MyModel, env:ParallelEnv, logs=Fals
             assert (new_action_log_p == action_log_p).all(), 'check the get_p yerham babak'
             assert (values == new_values).all(), 'check the get_p yerham babak'
             assert (entropy == new_entropy).all(), 'check the get_p yerham babak'
-            
-        
 
-        batch_next_obs, batch_reward, batch_terminated, batch_truncated, batch_next_state, batch_final_state = env.step(batch_state, action_index, model)
-                
+        batch_next_obs, batch_reward, batch_terminated, batch_next_state, batch_final_state = env.step(batch_state, action_index)
+
         stored_action_index += action_index
-        
+
         stored_state.append(batch_state[0])
         stored_value.append(values)
         stored_action_log_p.append(action_log_p)
@@ -120,52 +115,44 @@ def collect_trajectory(len_trajectory, model:MyModel, env:ParallelEnv, logs=Fals
         stored_reward.append(torch.tensor(batch_reward).unsqueeze(0))
         stored_done.append(torch.tensor(batch_terminated).unsqueeze(0))
 
-
         # print(batch_next_state[0].actions)
 
         for i in range(env.num_env):
-            done     = batch_terminated[i] or batch_truncated[i]
+            done = batch_terminated[i]
             final_state = batch_final_state[i]
             # print(done)
-            if done:
-                speedup_metric = final_state.root_exec_time /  final_state.exec_time
-                print('-'*70)
+            if done and final_state is not None:
+                speedup_metric = final_state.root_exec_time / final_state.exec_time
+                print('-' * 70)
                 print(final_state.raw_operation)
                 print(final_state.transformation_history)
                 print('cummulative_reward:', final_state.cummulative_reward)
                 print('speedup:', speedup_metric)
-                print('Old Exec time:', final_state.root_exec_time*1e-9, 'ms')
-                print('New Exec time:', final_state.exec_time*1e-9, 'ms')
-                print('-'*70)
+                print('Old Exec time:', final_state.root_exec_time * 1e-9, 'ms')
+                print('New Exec time:', final_state.exec_time * 1e-9, 'ms')
+                print('-' * 70)
                 if neptune_logs is not None and logs:
                     neptune_logs['train/final_speedup'].append(speedup_metric)
                     neptune_logs['train/cummulative_reward'].append(final_state.cummulative_reward)
                     neptune_logs[f'train/{final_state.raw_operation}_speedup'].append(speedup_metric)
-                    
-                
-                # running_return_stats.add(final_state.raw_operation, speedup_metric)
-                    
 
+                # running_return_stats.add(final_state.raw_operation, speedup_metric)
 
         batch_state = batch_next_state
         batch_obs = batch_next_obs
 
-
     with torch.no_grad():
-        x = torch.cat(batch_obs) 
+        x = torch.cat(batch_obs)
         _, _, next_value, _ = model.sample(x)
 
-    
-    stored_action_index = stored_action_index
     stored_value = torch.concatenate(stored_value)
     stored_action_log_p = torch.concatenate(stored_action_log_p)
     stored_x = torch.concatenate(stored_x)
     stored_reward = torch.concatenate(stored_reward).float()
-    stored_done = torch.concatenate(stored_done).float()    
-    
+    stored_done = torch.concatenate(stored_done).float()
+
     stored_next_value = torch.concatenate((stored_value[1:], next_value))
     assert (stored_value[1:] == stored_next_value[:-1]).all()
-        
 
     trajectory = (
         stored_state,
@@ -184,7 +171,6 @@ def collect_trajectory(len_trajectory, model:MyModel, env:ParallelEnv, logs=Fals
 def shuffle_trajectory(trajectory):
 
     stored_state, stored_action_index, stored_value, stored_next_value, stored_action_log_p, stored_x, stored_reward, stored_done = trajectory
-
 
     permutation = torch.randperm(stored_action_log_p.size()[0])
 
@@ -255,34 +241,34 @@ def ppo_update(trajectory, model, optimizer, ppo_epochs, ppo_batch_size, logs=Fa
     for epoch in range(ppo_epochs):
 
         stored_state, stored_action_index, stored_value, stored_next_value, stored_action_log_p, stored_x, stored_reward, stored_done = trajectory
-        
+
         len_trajectory = stored_x.shape[0]
         assert len_trajectory % ppo_batch_size == 0
-            
+
         stored_value = stored_value.reshape(-1).detach()
         stored_next_value = stored_next_value.reshape(-1).detach()
         stored_reward = stored_reward.reshape(-1).detach()
         stored_done = stored_done.reshape(-1).detach()
-        
+
         advantage, returns = compute_gae(stored_done, stored_reward, stored_value, stored_next_value)
-        
+
         if epoch == 0:
             for i in range(len(returns)):
                 if returns[i] != 0:
                     running_return_stats.add(stored_state[i].raw_operation, returns[i].item())
-        
-        
+
+
         # for i in range(len(returns)):
         #     if returns[i] != 0:
         #         returns[i] = returns[i] / running_return_stats.std(stored_state[i].raw_operation)
 
-        
+
         stored_action_index, stored_action_log_p, stored_x, stored_advantage, stored_returns = shuffle_ppo_data(stored_action_index, stored_action_log_p, stored_x, advantage, returns)
-        
+
 
         acc_loss = 0
         for i in range(len_trajectory // ppo_batch_size):
-                        
+
             begin, end = i*ppo_batch_size, (i+1)*ppo_batch_size
 
             action_index = stored_action_index[begin:end]
@@ -293,21 +279,21 @@ def ppo_update(trajectory, model, optimizer, ppo_epochs, ppo_batch_size, logs=Fa
 
             # New predicition:
             new_action_index, new_action_log_p, new_values, entropy = model.sample(x, actions=action_index)
-            
-            
+
+
             # print(advantage.round(decimals=2))
 
-            
+
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
-            
+
             new_action_log_p, action_log_p, advantage = new_action_log_p.reshape(-1), action_log_p.reshape(-1), advantage.reshape(-1)
-            
+
             ratio = torch.exp(new_action_log_p - action_log_p.detach())
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-0.2, 1+0.2) * advantage
             policy_loss = - torch.min(surr1, surr2).mean()
-            
-            
+
+
             returns, new_values = returns.reshape(-1), new_values.reshape(-1)
 
             value_loss = ((returns - new_values)**2).mean()
@@ -343,11 +329,11 @@ def ppo_update(trajectory, model, optimizer, ppo_epochs, ppo_batch_size, logs=Fa
 
 
 def evaluate_benchamrk(model, env, logs):
-    
+
     for i, operation in enumerate(env.env.operations_files):
-        
+
         print(f'Operation ({i}):', env.env.operations_files[i][0])
-        
+
         # Reset the environement with the specific operation
         state, obs = env.reset(i)
         obs = torch.cat(obs).to(device)
@@ -360,7 +346,7 @@ def evaluate_benchamrk(model, env, logs):
 
             # Apply the action and get the next state
             next_obs, reward, terminated, truncated, next_state, final_state = env.step(state, action, model)
-            
+
             done = terminated[0] or truncated[0]
             if done:
                 final_state = final_state[0]
@@ -369,15 +355,15 @@ def evaluate_benchamrk(model, env, logs):
                 print('Base execution time:', final_state.root_exec_time / 1e9, 's')
                 print('New execution time:', final_state.exec_time / 1e9, 's')
                 print('speedup:', speedup_metric)
-                
+
                 if neptune_logs is not None and  logs:
-                    neptune_logs[f'eval/{final_state.raw_operation}_speedup'].append(speedup_metric)  
-                
-                break    
+                    neptune_logs[f'eval/{final_state.raw_operation}_speedup'].append(speedup_metric)
+
+                break
 
             state = next_state
             obs = torch.cat(next_obs).to(device)
-            
+
         print('\n\n\n')
 
 # Start the training:
@@ -386,13 +372,15 @@ def evaluate_benchamrk(model, env, logs):
 CONFIG = {
     'len_trajectory': 64,
     'ppo_batch_size': 64,
-    'steps':10000,
-    'ppo_epochs':4,
-    'logs':False,
-    'entropy_coef':0.01,
-    'lr':0.001,
-    'truncate':5,
-    'json_file':"generated_data/train_operations.json",
+    'steps': 10000,
+    'ppo_epochs': 4,
+    'logs': True,
+    'entropy_coef': 0.01,
+    'lr': 0.001,
+    'truncate': 5,
+    'json_file': os.path.abspath("generated_data/train_operations.json"),
+    'from_lqcd': True,
+    'lqcd_benchmark': 'AB'
 }
 
 env = ParallelEnv(
@@ -401,14 +389,17 @@ env = ParallelEnv(
     truncate=CONFIG["truncate"],
     reset_repeat=1,
     step_repeat=1,
+    from_lqcd=CONFIG["from_lqcd"]
 )
 
 eval_env = ParallelEnv(
-    json_file="generated_data/eval_operations.json",
+    # json_file=os.path.abspath("generated_data/eval_operations.json"),
+    json_file=CONFIG["json_file"],
     num_env=1,
     truncate=5,
     reset_repeat=1,
     step_repeat=1,
+    from_lqcd=CONFIG["from_lqcd"]
 )
 
 print_info('Env build ...')
@@ -416,8 +407,8 @@ print_info(f'tmp_file = {env.env.tmp_file}')
 
 print(CONFIG)
 
-input_dim =  1 + MAX_NUM_LOOPS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM*MAX_NUM_STORES_LOADS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM + 5 + \
-    MAX_NUM_LOOPS*3*CONFIG["truncate"]
+input_dim = 1 + MAX_NUM_LOOPS + MAX_NUM_LOOPS * MAX_NUM_LOAD_STORE_DIM * MAX_NUM_STORES_LOADS + MAX_NUM_LOOPS * MAX_NUM_LOAD_STORE_DIM + 5 + \
+    MAX_NUM_LOOPS * 3 * CONFIG["truncate"]
 print_info('input_dim:', input_dim)
 
 model = MyModel(
@@ -436,13 +427,9 @@ optimizer = torch.optim.Adam(
 
 running_return_stats = Buffer(max_size=10000)
 
-
-len_trajectory = CONFIG['len_trajectory']
-ppo_batch_size = CONFIG['ppo_batch_size']
-
 print_info('Start training ... ')
 logs = CONFIG['logs']
-neptune_logs = init_neptune(['hierchical', 'sparse_reward'] + [k+':'+str(v) for (k, v) in CONFIG.items()]) if logs else None
+neptune_logs = init_neptune(['hierchical', 'sparse_reward'] + [k + ':' + str(v) for (k, v) in CONFIG.items()]) if logs else None
 
 if logs:
     neptune_logs["config_files"].upload_files([
@@ -457,18 +444,18 @@ tqdm_range = tqdm(range(CONFIG['steps']), desc='Main loop')
 for step in tqdm_range:
 
     trajectory = collect_trajectory(
-        CONFIG['len_trajectory'], 
-        model, 
+        CONFIG['len_trajectory'],
+        model,
         env,
         logs=True
     )
 
     loss = ppo_update(
-        trajectory, 
-        model, 
-        optimizer, 
-        ppo_epochs=CONFIG['ppo_epochs'], 
-        ppo_batch_size=CONFIG['ppo_batch_size'], 
+        trajectory,
+        model,
+        optimizer,
+        ppo_epochs=CONFIG['ppo_epochs'],
+        ppo_batch_size=CONFIG['ppo_batch_size'],
         logs=True
     )
 
@@ -480,15 +467,13 @@ for step in tqdm_range:
             env=eval_env,
             logs=True
         )
-        
+
         if logs and neptune_logs is not None:
             neptune_logs["params"].upload_files(['models/ppo_model_conv2d.pt'])
-        
-    
+
 
 if neptune_logs is not None and logs:
     neptune_logs.stop()
-    
+
 print_info('End training ... ')
 print_success('YOUPI')
-
