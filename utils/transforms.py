@@ -3,7 +3,7 @@ import subprocess
 import multiprocessing
 import re
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 
 def print_info(*args):

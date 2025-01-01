@@ -12,6 +12,6 @@
 #SBATCH --reservation=c2
 
 CONDA_DIR=/share/apps/NYUAD5/miniconda/3-4.11.0
-CONDA_ENV=/home/ia2280/.conda/envs/main_env_5
+CONDA_ENV=/home/na3758/.conda/envs/mlir-env
 conda activate $CONDA_ENV
 python hierarchical_train.py

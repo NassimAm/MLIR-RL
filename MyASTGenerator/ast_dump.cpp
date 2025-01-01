@@ -197,5 +197,5 @@ int main(int argc, char **argv)
 }
 
 
-// cmake .. -DMLIR_DIR=/scratch/mt5383/llvm-project/build/lib/cmake/mlir -DLLVM_EXTERNAL_LIT=/scratch/mt5383/llvm-project/build/bin/llvm-lit
+// cmake .. -DMLIR_DIR=/scratch/na3758/llvm19/build/lib/cmake/mlir -DLLVM_EXTERNAL_LIT=/scratch/na3758/llvm19/build/bin/llvm-lit
 // cmake --build MyASTGenerator/build/ && MyASTGenerator/build/bin/AstDumper examples/x1.mlir

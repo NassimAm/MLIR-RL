@@ -15,7 +15,9 @@ import numpy as np
 from tqdm import tqdm
 import neptune
 
+from dotenv import load_dotenv
 
+load_dotenv(override=True)
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
@@ -45,7 +47,7 @@ def init_neptune(tags: list):
         project=os.getenv('NEPTUNE_PROJECT'),
         api_token=os.getenv('NEPTUNE_TOKEN'),
         tags=tags,
-        # mode="sync"
+        mode="sync"
     )
     return run
 
