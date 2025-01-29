@@ -4,7 +4,7 @@ import json
 from typing import Literal
 
 
-class Config(metaclass=Singleton):
+class RASConfig(metaclass=Singleton):
     """Class to store and load global configuration"""
     max_num_stores_loads: int
     """The maximum number of loads in the nested loops"""
@@ -80,7 +80,7 @@ class Config(metaclass=Singleton):
     def load_from_json(self):
         """Load the configuration from the JSON file."""
         # Open the JSON file
-        with open(os.getenv("CONFIG_FILE_PATH"), "r") as f:
+        with open(os.getenv("RAS_CONFIG_FILE_PATH"), "r") as f:
             config = json.load(f)
         # Set the configuration values
         self.max_num_stores_loads = config["max_num_stores_loads"]
@@ -134,6 +134,177 @@ class Config(metaclass=Singleton):
             "lr": self.lr,
             "truncate": self.truncate,
             "json_file": self.json_file,
+            "tags": self.tags,
+            "logging": self.logging
+        }
+
+    def __str__(self):
+        """Convert the configuration to a string."""
+        return str(self.to_dict())
+
+
+class AASConfig(metaclass=Singleton):
+    """Class to store and load global configuration"""
+    nb_iterations: int
+    """Number of iterations for running the AlphaAutoScheduler agent"""
+    max_num_stores_loads: int
+    """The maximum number of loads in the nested loops"""
+    max_num_loops: int
+    """The max number of nested loops"""
+    max_num_load_store_dim: int
+    """The max number of dimensions in load/store buffers"""
+    num_tile_sizes: int
+    """The number of tile sizes"""
+    num_transformations: int
+    """The number of transformations"""
+    enable_hierarchical_space: bool
+    """Flag to enable hierarchical space for actions"""
+    normalize_features: bool
+    """Flag to normalize the features"""
+    learning_rate: float
+    """Learning rate"""
+    mcts_max_num_tile_combinations: int
+    """The maximum number of tile combinations to consider in MCTS. If -1, all combinations are considered."""
+    mcts_nb_iterations: int
+    """The number of MCTS iterations"""
+    mcts_estimation_mode: Literal['VEMS', 'VEAS']
+    """The estimation mode for MCTS"""
+    mcts_c_puct: float
+    """The PUCT constant for MCTS"""
+    mcts_action_temperature_decay: float
+    """The temperature decay for MCTS action probabilities"""
+    mcts_random_exploration_temperature_decay: float
+    """The temperature decay for MCTS random exploration"""
+    bse_param: float
+    """The Boltzmann squared error parameter. It controls how much close the value would be from the max value.
+    A param close to 0 means that minimizing the error would converge to the mean value, a param that goes to positive infinity means the value would converge to the max value."""
+    bse_relaxation: float
+    """The Boltzmann squared error relaxation parameter. It controls how much the error gradient would relaxed."""
+    vect_size_limit: int
+    """Vectorization size limit to prevent large sizes vectorization"""
+    use_bindings: bool
+    """Flag to enable using python bindings for execution, if False, the execution will be done using the command line. Default is False."""
+    use_vectorizer: bool
+    """Flag to enable using the vectorizer C++ program for vectorization, if False, vectorization is done using transform dialect directly. Default is False."""
+    data_format: Literal["json", "mlir"]
+    """The format of the data, can be either "json" or "mlir". "json" mode reads json files containing benchmark features, "mlir" mode reads mlir code files directly and extract features from it using AST dumper. Default is "json"."""
+    optimization_mode: Literal["last", "all"]
+    """The optimization mode to use, "last" will optimize only the last operation, "all" will optimize all operations in the code. Default is "last"."""
+    benchmarks_folder_path: str
+    """Path to the benchmarks folder. Can be empty if optimization mode is set to "last"."""
+    json_file: str
+    """Path to the JSON file containing the benchmarks code or features."""
+    exec_db_path: str
+    """Path to the execution database file."""
+    tags: list[str]
+    """List of tags to add to the neptune experiment"""
+    logging: bool
+    """Flag to enable logging to neptune"""
+
+    loaded: bool
+    """Flag to check if the config was already loaded from JSON file or not"""
+
+    def __init__(self):
+        """Initialize the default values"""
+        self.nb_iterations = 10000
+        self.max_num_stores_loads = 7
+        self.max_num_loops = 7
+        self.max_num_load_store_dim = 7
+        self.num_tile_sizes = 7
+        self.num_transformations = 3
+        self.enable_hierarchical_space = True
+        self.normalize_features = False
+        self.learning_rate = 0.001
+        self.mcts_max_num_tile_combinations = -1
+        self.mcts_nb_iterations = 1000
+        self.mcts_estimation_mode = "VEMS"
+        self.mcts_c_puct = 1.0
+        self.mcts_action_temperature_decay = 1.0
+        self.mcts_random_exploration_temperature_decay = 0.99
+        self.bse_param = 1.5
+        self.bse_relaxation = 0.001
+        self.vect_size_limit = 512
+        self.use_bindings = False
+        self.use_vectorizer = False
+        self.data_format = "json"
+        self.optimization_mode = "last"
+        self.benchmarks_folder_path = ""
+        self.exec_db_path = ""
+        self.json_file = ""
+        self.tags = []
+        self.logging = True
+        self.loaded = False
+
+    def load_from_json(self):
+        """Load the configuration from the JSON file."""
+        # Open the JSON file
+        with open(os.getenv("AAS_CONFIG_FILE_PATH"), "r") as f:
+            config = json.load(f)
+        # Set the configuration values
+        self.nb_iterations = config["nb_iterations"]
+        self.max_num_stores_loads = config["max_num_stores_loads"]
+        self.max_num_loops = config["max_num_loops"]
+        self.max_num_load_store_dim = config["max_num_load_store_dim"]
+        self.num_tile_sizes = config["num_tile_sizes"]
+        self.num_transformations = config["num_transformations"]
+        self.enable_hierarchical_space = config["enable_hierarchical_space"]
+        self.normalize_features = config["normalize_features"]
+        self.learning_rate = config["learning_rate"]
+        self.mcts_max_num_tile_combinations = config["mcts_max_num_tile_combinations"]
+        self.mcts_nb_iterations = config["mcts_nb_iterations"]
+        self.mcts_estimation_mode = config["mcts_estimation_mode"]
+        self.mcts_c_puct = config["mcts_c_puct"]
+        self.mcts_action_temperature_decay = config["mcts_action_temperature_decay"]
+        self.mcts_random_exploration_temperature_decay = config["mcts_random_exploration_temperature_decay"]
+        self.bse_param = config["bse_param"]
+        self.bse_relaxation = config["bse_relaxation"]
+        self.vect_size_limit = config["vect_size_limit"]
+        self.use_bindings = config["use_bindings"]
+        self.use_vectorizer = config["use_vectorizer"]
+        self.data_format = config["data_format"]
+        self.optimization_mode = config["optimization_mode"]
+        self.benchmarks_folder_path = config["benchmarks_folder_path"]
+        self.json_file = config["json_file"]
+        self.exec_db_path = config["exec_db_path"]
+        self.tags = config["tags"]
+        self.logging = config["logging"]
+        # Check the configuration values
+        assert self.mcts_estimation_mode in ["VEMS", "VEAS"], "Invalid MCTS estimation mode. Should be 'VEMS' or 'VEAS'."
+        assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
+        assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
+        assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
+        assert self.data_format != "json" or not self.use_bindings, "The specific case of using python bindings with JSON data format is not implemented yet."
+        # Set loaded flag
+        self.loaded = True
+
+    def to_dict(self):
+        """Convert the configuration to a dictionary."""
+        return {
+            "nb_iterations": self.nb_iterations,
+            "max_num_stores_loads": self.max_num_stores_loads,
+            "max_num_loops": self.max_num_loops,
+            "max_num_load_store_dim": self.max_num_load_store_dim,
+            "num_tile_sizes": self.num_tile_sizes,
+            "num_transformations": self.num_transformations,
+            "enable_hierarchical_space": self.enable_hierarchical_space,
+            "normalize_features": self.normalize_features,
+            "learning_rate": self.learning_rate,
+            "mcts_max_num_tile_combinations": self.mcts_max_num_tile_combinations,
+            "mcts_nb_iterations": self.mcts_nb_iterations,
+            "mcts_estimation_mode": self.mcts_estimation_mode,
+            "mcts_c_puct": self.mcts_c_puct,
+            "mcts_action_temperature_decay": self.mcts_action_temperature_decay,
+            "mcts_random_exploration_temperature_decay": self.mcts_random_exploration_temperature_decay,
+            "bse_param": self.bse_param,
+            "bse_relaxation": self.bse_relaxation,
+            "vect_size_limit": self.vect_size_limit,
+            "use_bindings": self.use_bindings,
+            "use_vectorizer": self.use_vectorizer,
+            "data_format": self.data_format,
+            "optimization_mode": self.optimization_mode,
+            "benchmarks_folder_path": self.benchmarks_folder_path,
+            "json_file": self.json_file,
+            "exec_db_path": self.exec_db_path,
             "tags": self.tags,
             "logging": self.logging
         }

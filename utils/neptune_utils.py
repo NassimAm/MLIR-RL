@@ -3,7 +3,7 @@ import neptune
 from typing import Literal
 
 
-def init_neptune(tags: list, mode: Literal["async", "sync", "offline", "read-only", "debug"] = "async"):
+def init_neptune(tags: list, mode: Literal["async", "sync", "offline", "read-only", "debug"] = "async", cfg_path: str = os.getenv('CONFIG_FILE_PATH')) -> neptune.Run:
     # Get tags
     tags = list(map(str, tags))
     # Initialize neptune run
@@ -20,5 +20,5 @@ def init_neptune(tags: list, mode: Literal["async", "sync", "offline", "read-onl
         './train.py'
     ])
     # Upload config
-    run["config"].upload(os.getenv('CONFIG_FILE_PATH'))
+    run["config"].upload(cfg_path)
     return run

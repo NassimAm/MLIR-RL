@@ -1,7 +1,7 @@
-from utils.config import RASConfig
+from utils.config import AASConfig
 
 
 # Load global configuration
-config = RASConfig()
+config = AASConfig()
 if not config.loaded:
     config.load_from_json()

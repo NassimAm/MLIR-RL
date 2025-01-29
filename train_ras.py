@@ -5,6 +5,7 @@ load_dotenv(override=True)
 # Import modules
 from rl_autoschedular.env import ParallelEnv
 from rl_autoschedular.model import HiearchyModel as Model
+import os
 import torch
 from tqdm import tqdm
 from rl_autoschedular import config as cfg
@@ -51,7 +52,7 @@ optimizer = torch.optim.Adam(
 )
 
 # Set neptune logs if enabled
-neptune_logs = init_neptune(['hierchical', 'sparse_reward'] + cfg.tags) if cfg.logging else None
+neptune_logs = init_neptune(['hierchical', 'sparse_reward'] + cfg.tags, cfg_path=os.getenv('RAS_CONFIG_FILE_PATH')) if cfg.logging else None
 
 # Start training
 print_info('Start training ... ')

@@ -2,4 +2,5 @@
 *
 # Except these files
 !.gitignore
-!train_example.sh
+!train_ras_example.sh
+!train_aas_example.sh

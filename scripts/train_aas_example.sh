@@ -21,5 +21,7 @@ eval "$(conda shell.bash hook)"
 # Activate any environments if required
 conda activate $CONDA_ENV_NAME
 
+# Set config file path
+export AAS_CONFIG_FILE_PATH=config/aas_example.json
 # Execute the code
-python /scratch/$NYU_NET_ID/MLIR-RL/train.py
+python /scratch/$NYU_NET_ID/MLIR-RL/train_aas.py
