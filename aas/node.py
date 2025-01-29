@@ -19,15 +19,15 @@ class Node:
     """The number of times this node has been visited"""
     q: float
     """The max expected speedup of this node if mode is 'VEMS' or the average expected speedup if mode is 'VEAS'."""
-    node_p: float
-    """The probability of selecting this node from its parent node."""
+    node_exploration_factor: float
+    """The exploration factor for selecting this node from its parent node."""
 
-    def __init__(self, state: OperationState, node_p: float = 1.0, parent: Optional['Node'] = None):
+    def __init__(self, state: OperationState, node_exploration_factor: float = 1.0, parent: Optional['Node'] = None):
         """Initialize a new node in the MCTS tree.
 
         Args:
             state (OperationState): The state of the operation at this node.
-            node_p (float): The probability of selecting this node from its parent node. Defaults to 1.0.
+            node_exploration_factor (float): The exploration factor for selecting this node from its parent node. Defaults to 1.0.
             parent (Optional[Node]): The parent node of this node. Defaults to None.
         """
         self.state = state
@@ -35,14 +35,14 @@ class Node:
         self.children = []
         self.nb_visits = 0
         self.q = 0.0
-        self.node_p = node_p
+        self.node_exploration_factor = node_exploration_factor
 
-    def add_child(self, child_state: OperationState, child_node_p: float):
+    def add_child(self, child_state: OperationState, child_node_factor: float):
         """Add a child node to this node.
 
         Args:
             child_state (OperationState): The state of the operation at the child node.
-            child_node_p (float): The probability of selecting the child node from this node.
+            child_node_factor (float): The exploration factor for selecting the child node from this node.
 
         Returns:
             Node: The child node that was added.
@@ -50,7 +50,7 @@ class Node:
         # Create child node
         child = Node(
             state=child_state,
-            node_p=child_node_p,
+            node_exploration_factor=child_node_factor,
             parent=self
         )
         # Add child to children list
@@ -97,7 +97,7 @@ class Node:
             float: The s score of the node.
         """
         if self.parent is not None:
-            return self.q + c_puct * self.node_p * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
+            return self.q + c_puct * self.node_exploration_factor * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
         else:
             return self.q
 
@@ -150,4 +150,4 @@ class Node:
         return (Vectorization.DEFAULT_NAME in transformation_names) or (NoTransformation.DEFAULT_NAME in transformation_names)
 
     def __repr__(self):
-        return f"<Node nb_visits={self.nb_visits} s={self.get_s_score()} q={self.q} p_node={self.node_p}>"
+        return f"<Node nb_visits={self.nb_visits} s={self.get_s_score()} q={self.q} explore_factor={self.node_exploration_factor}>"

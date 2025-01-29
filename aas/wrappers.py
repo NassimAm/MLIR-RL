@@ -26,30 +26,30 @@ class AASNetworkPolicyEstimation:
         self.select_probs = select_probs
         self.parallel_params_probs = parallel_params_probs
 
-    def get_action_prob(self, action: Action, random_action_temperature: float):
-        """Get the probability of an action given the estimation.
+    def get_action_explore_factor(self, action: Action, random_action_temperature: float):
+        """Get the exploration factor of an action given the estimation.
 
         Args:
-            action (Action): The action to get the probability of.
+            action (Action): The action to get the exploration factor of.
             random_action_temperature (float): The temperature parameter for the random action selection.
 
         Returns:
-            float: The probability of the action."""
+            float: The exploration factor of the action."""
 
         if isinstance(action, Parallelization):
-            parallel_prob = self.select_probs[Parallelization.ID].item()
-            joint_action_prob = parallel_prob
+            parallel_factor = self.select_probs[Parallelization.ID].item()
+            joint_action_factor = parallel_factor
             for i, param in enumerate(action.params):
-                joint_action_prob *= self.parallel_params_probs[i, (int(math.log2(param)) + 1 if param > 0 else 0)].item()
-            action_prob = random_action_temperature * parallel_prob + (1 - random_action_temperature) * joint_action_prob
+                joint_action_factor *= self.parallel_params_probs[i, (int(math.log2(param)) + 1 if param > 0 else 0)].item()
+            action_factor = random_action_temperature * parallel_factor + (1 - random_action_temperature) * joint_action_factor
         elif isinstance(action, NoTransformation):
-            action_prob = self.select_probs[NoTransformation.ID].item()
+            action_factor = self.select_probs[NoTransformation.ID].item()
         elif isinstance(action, Vectorization):
-            action_prob = self.select_probs[Vectorization.ID].item()
+            action_factor = self.select_probs[Vectorization.ID].item()
         else:
             raise ValueError(f'Action {action} is not supported !')
 
-        return action_prob
+        return action_factor
 
     def get_max_hierarchical_prob_action(self):
         """Get the action with the highest probability in a hierarchical manner given the estimation.
@@ -92,16 +92,16 @@ class AASNetworkEstimation:
         self.policy = policy
         self.value = value
 
-    def get_action_prob(self, action: Action, random_action_temperature: float):
-        """Get the probability of an action given the estimation.
+    def get_action_exploration_factor(self, action: Action, random_action_temperature: float):
+        """Get the exploration factor of an action given the estimation.
 
         Args:
-            action (Action): The action to get the probability of.
+            action (Action): The action to get the exploration factor of.
             random_action_temperature (float): The temperature parameter for the random action selection.
 
         Returns:
-            float: The probability of the action."""
-        return self.policy.get_action_prob(action, random_action_temperature)
+            float: The exploration factor of the action."""
+        return self.policy.get_action_explore_factor(action, random_action_temperature)
 
     def get_value(self):
         """Get the value of the operation."""
@@ -231,21 +231,21 @@ class AASNetworkManager:
         # Return the action probabilities
         return aas_estimation
 
-    def get_action_prob(self, action: Action, random_action_temperature: float, aas_estimation: Optional[AASNetworkEstimation] = None):
-        """Get the probability of an action given the action probabilities.
+    def get_action_exploration_factor(self, action: Action, random_action_temperature: float, aas_estimation: Optional[AASNetworkEstimation] = None):
+        """Get the exploration factor of an action given the action probabilities.
 
         Args:
-            action (Action): The action to get the probability of.
+            action (Action): The action to get the exploration factor of.
             random_action_temperature (float): The temperature parameter for the random action selection.
             aas_estimation (Optional[AASNetworkEstimation]): The estimation made by the AASNetwork. Defaults to None.
 
         Returns:
-            float: The probability of the action.
+            float: The exploration factor of the action.
         """
         if aas_estimation is None:
             raise NotImplementedError('AASNetwork estimation not provided. This case is not implemented yet !')
 
-        return aas_estimation.get_action_prob(action, random_action_temperature)
+        return aas_estimation.get_action_exploration_factor(action, random_action_temperature)
 
     def evaluate_tree(self, root: Node, temperature: float):
         """Get the full AASNetwork policy estimation and the action with the highest MCTS probability after the root node.

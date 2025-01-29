@@ -1,5 +1,5 @@
 from aas import config as cfg
-from aas.observation import OperationFeatures
+from aas.observation import OperationFeatures, NestedLoopFeatures
 
 
 class Action:
@@ -19,6 +19,14 @@ class Action:
     def name(self):
         """The name of the transformation."""
         return self._name
+
+    def update_op_features(self, operation_features: OperationFeatures):
+        """Update the operation features with the transformation.
+
+        Args:
+            operation_features (OperationFeatures): The operation features to update.
+        """
+        ...
 
     def __repr__(self):
         return f'{self.name}()'
@@ -109,6 +117,32 @@ class Parallelization(ParameterizedAction):
             candidates.append([0])
 
         return candidates
+
+    def update_op_features(self, operation_features: OperationFeatures):
+        """Update the operation features with the tiling.
+
+        Args:
+            operation_features (OperationFeatures): The operation features to update.
+        """
+        nested_loops = []
+        op_iter_space_size = operation_features.op_iter_space_size
+        for i, nested_loop in enumerate(operation_features.nested_loops):
+            nested_loops.append(NestedLoopFeatures(
+                arg=nested_loop.arg,
+                lower_bound=nested_loop.lower_bound,
+                upper_bound=nested_loop.upper_bound if self.params[i] == 0 else nested_loop.upper_bound // self.params[i],
+                step=nested_loop.step,
+                iterator_type=nested_loop.iterator_type
+            ))
+            op_iter_space_size //= self.params[i] if self.params[i] != 0 else 1
+        return OperationFeatures(
+            operation_type=operation_features.operation_type,
+            op_count=operation_features.op_count,
+            op_iter_space_size=op_iter_space_size,
+            nested_loops=nested_loops,
+            load_data=operation_features.load_data,
+            store_data=operation_features.store_data
+        )
 
 
 class Vectorization(Action):

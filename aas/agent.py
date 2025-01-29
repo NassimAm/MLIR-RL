@@ -30,17 +30,19 @@ class AlphaAutoScheduler:
         self.tmp_file_path = tmp_file_path
         self.stats = AlphaAutoSchedulerStats()
 
-    def run(self, state: OperationState, root_exec_time: int) -> tuple[OperationState, Optional[int], bool]:
+    def run(self, state: OperationState, full_code: str, root_exec_time: int) -> tuple[OperationState, Optional[int], bool, str]:
         """Run the Alpha AutoScheduler on a given state.
 
         Args:
             state (OperationState): The state to run the Alpha AutoScheduler on.
+            full_code (str): The code to optimize.
             root_exec_time (int): Execution time of the code right before optimizing the operation represented by the state given.
 
         Returns:
             OperationState: The state after running the Alpha AutoScheduler.
             Optional[int]: The execution time of the optimized code.
             bool: Whether the assertion was successful.
+            str: The transformed and optimized code.
         """
         # Create an MCTS tree with the given state
         root = Node(state)
@@ -57,12 +59,12 @@ class AlphaAutoScheduler:
                 value=torch.tensor(0.0)
             )))
             # Make the next node the root node
-            next_node.node_p = 1.0
+            next_node.node_exploration_factor = 1.0
             next_node.parent = None
             node = next_node
         # Evaluate the code
         # TODO: Assertion should always be true (do something to check this)
-        exec_time, assertion = evaluate_code_with_timeout(node.state, self.tmp_file_path)
+        exec_time, assertion, transformed_code = evaluate_code_with_timeout(node.state, full_code, self.tmp_file_path)
         # If the code execution was successful and the assertion is true
         if (exec_time is not None) and assertion:
             # Get target value
@@ -73,7 +75,7 @@ class AlphaAutoScheduler:
             # Train the model on the trajectory
             self.network_manager.train_on_trajectory(trajectory)
 
-        return node.state, exec_time, assertion
+        return node.state, exec_time, assertion, transformed_code
 
     def get_speedup_reward(self, root_exec_time: int, exec_time: int):
         """Get the speedup reward based on the execution time.

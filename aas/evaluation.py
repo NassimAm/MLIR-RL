@@ -8,6 +8,7 @@ from typing import Union, Optional
 import multiprocessing
 from aas import config as cfg
 from aas.state import OperationState
+from aas.transforms import apply_transformation_with_timeout
 import json
 
 
@@ -217,18 +218,36 @@ def evaluate_code_with_cmd_and_timeout(code: str, tmp_file_path: str, timeout: O
 
 # ================================== Evaluation Functions (Both) ==================================
 
-def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeout: Optional[float] = None):
+def evaluate_code_with_timeout(state: OperationState, code: str, tmp_file_path: str, timeout: Optional[float] = None):
     """Evaluates the given MLIR code using Python bindings or MLIR opt and MLIR CPU Runner with a timeout.
 
     Args:
         state (OperationState): The state to run the Alpha AutoScheduler on.
+        code (str): The MLIR code to run.
         tmp_file_path (str): The temporary file path to write the MLIR code.
         timeout (Optional[float]): The timeout in seconds.
 
     Returns:
         Optional[float]: the execution time in seconds.
         bool: the assertion result.
+        str: the transformed code.
     """
+    # Transform the code
+    for action in state.transformation_history:
+        # If code is not None or empty, apply the transformation
+        if code:
+            code = apply_transformation_with_timeout(
+                state=state,
+                code=code,
+                tmp_file_path=tmp_file_path,
+                action=action,
+                timeout=timeout,
+                use_vectorizer=cfg.use_vectorizer
+            )
+        else:
+            # If code is None or empty, return execution error
+            return None, False, code
+
     # Check execution database for the execution time of the given state
     if cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
@@ -239,12 +258,13 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
                 if op_db:
                     exec_time = bench_db.get(state.transformation_history_to_str())
                     if exec_time:
-                        return exec_time, True
-    # Otherwise evaluate the code manually
+                        return exec_time, True, code
+
+    # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
-        exec_time, assertion = evaluate_code_with_bindings_and_timeout(state.transformed_code, state.bench_name, timeout=timeout)
+        exec_time, assertion = evaluate_code_with_bindings_and_timeout(code, state.bench_name, timeout=timeout)
     else:
-        exec_time, assertion = evaluate_code_with_cmd_and_timeout(state.transformed_code, tmp_file_path, timeout=timeout)
+        exec_time, assertion = evaluate_code_with_cmd_and_timeout(code, tmp_file_path, timeout=timeout)
     # Store the execution time in the execution database
     if (exec_time is not None) and assertion and cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
@@ -260,5 +280,6 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
         op_db[state.transformation_history_to_str()] = exec_time
         with open(cfg.exec_db_path, "w") as f:
             json.dump(exec_db, f)
-    # Return the execution time and assertion result
-    return exec_time, assertion
+
+    # Return the execution time and assertion result and transformed code
+    return exec_time, assertion, code

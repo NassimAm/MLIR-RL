@@ -13,20 +13,17 @@ class OperationState:
     """Tag used to identify the operation in the MLIR code."""
     operation_features: OperationFeatures
     """Features of the operation."""
-    transformed_code: str
-    """The operation string with wrapping and transformations."""
     step_count: int
     """The current step in the list of transformations applied to the operation."""
     transformation_history: list[Action]
     """List of transformations with their parameters applied to the operation."""
 
     def __init__(self, bench_name: str, operation_tag: str, operation_features: OperationFeatures,
-                 transformed_code: str, step_count: int, transformation_history: list[Action]):
+                 step_count: int, transformation_history: list[Action]):
         """Initialize the operation state."""
         self.bench_name = bench_name
         self.operation_tag = operation_tag
         self.operation_features = operation_features
-        self.transformed_code = transformed_code
         self.step_count = step_count
         self.transformation_history = transformation_history
 
@@ -133,6 +130,26 @@ class OperationState:
             ])
 
         return feature_vector
+
+    def next(self, action: Action):
+        """Get the next state of the environment given an action.
+
+        Args:
+            action (Action): The action to apply to the current state.
+
+        Returns:
+            OperationState: The next state of the environment.
+        """
+        new_op_features = self.operation_features
+        if isinstance(action, Parallelization):
+            new_op_features = action.update_op_features(self.operation_features)
+        return OperationState(
+            bench_name=self.bench_name,
+            operation_tag=self.operation_tag,
+            operation_features=new_op_features,
+            step_count=self.step_count + 1,
+            transformation_history=self.transformation_history + [action]
+        )
 
     def transformation_history_to_str(self):
         """Convert the transformation history to a string.

@@ -1,8 +1,5 @@
 from aas import config as cfg
 from aas.wrappers import AASNetworkManager
-from aas.state import OperationState
-from aas.transforms import apply_transformation_with_timeout
-from aas.observation import extract_op_features_from_code
 from aas.node import Node
 from typing import Literal
 
@@ -68,31 +65,12 @@ class MCTS:
         # Get available actions
         available_actions = node.get_available_actions()
         for action in available_actions:
-            # Get transformed code
-            transformed_code = apply_transformation_with_timeout(
-                state=node.state,
-                code=node.state.transformed_code,
-                tmp_file_path=self.tmp_file_path,
-                action=action,
-                timeout=20,
-                use_vectorizer=cfg.use_vectorizer
-            )
-            # Get new operation state
-            new_op_features = extract_op_features_from_code(transformed_code, node.state.operation_tag)
-            if new_op_features is None:
-                new_op_features = node.state.operation_features
-            next_state = OperationState(
-                bench_name=node.state.bench_name,
-                operation_tag=node.state.operation_tag,
-                operation_features=new_op_features,
-                transformed_code=transformed_code,
-                step_count=node.state.step_count + 1,
-                transformation_history=node.state.transformation_history + [action]
-            )
-            # Process child node probability
-            child_node_p = self.aas_network_manager.get_action_prob(action, self.random_exploration_temperature, aas_estimation=aas_estimation)
+            # Get next state
+            next_state = node.state.next(action)
+            # Process child node exploration factor
+            child_node_factor = self.aas_network_manager.get_action_exploration_factor(action, self.random_exploration_temperature, aas_estimation=aas_estimation)
             # Add child node to the tree
-            node.add_child(next_state, child_node_p)
+            node.add_child(next_state, child_node_factor)
 
         # print("Expanded node:", node)
         # print("Children:", [str(child) for child in node.children])

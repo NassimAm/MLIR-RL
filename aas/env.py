@@ -123,7 +123,6 @@ class AASTrainer:
             bench_name=bench_name,
             operation_tag=operation_tag,
             operation_features=operation_features,
-            transformed_code=benchmark_data.code,
             step_count=0,
             transformation_history=[]
         )
@@ -147,10 +146,13 @@ class AASTrainer:
         bench_name, bench_data = self.benchmarks_data[self.bench_index]
 
         # Run the agent
-        optimized_state, optimized_exec_time, assertion = agent.run(state, bench_data.exec_time)
+        optimized_state, optimized_exec_time, assertion, optimized_code = agent.run(state, bench_data.code, bench_data.exec_time)
         # Print infos and update reward
         if optimized_exec_time is None:
-            print_error(f"EXECUTION ERROR ({optimized_state.bench_name} {optimized_state.operation_tag}): {optimized_state.transformation_history}")
+            if optimized_code:
+                print_error(f"EXECUTION ERROR ({optimized_state.bench_name} {optimized_state.operation_tag}): {optimized_state.transformation_history}")
+            else:
+                print_error(f"TRANSFORMATION ERROR ({optimized_state.bench_name} {optimized_state.operation_tag}): {optimized_state.transformation_history}")
         else:
             if assertion:
                 print_success(f"RELATIVE SPEEDUP ({optimized_state.bench_name} {optimized_state.operation_tag}): {bench_data.exec_time / optimized_exec_time}")
@@ -169,7 +171,7 @@ class AASTrainer:
                 # Benchmark optimization is not over
                 terminated = False
                 # Re-extract operations data from the new code
-                new_bench_data = extract_bench_features_from_code(bench_name, optimized_state.transformed_code, bench_data.root_exec_time, optimized_exec_time)
+                new_bench_data = extract_bench_features_from_code(bench_name, optimized_code, bench_data.root_exec_time, optimized_exec_time)
                 self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
                 # Build a new state that points to the next operation
                 new_op_tag = new_bench_data.operation_tags[op_index - 1]
@@ -178,7 +180,6 @@ class AASTrainer:
                     bench_name=bench_name,
                     operation_tag=new_op_tag,
                     operation_features=new_op_features,
-                    transformed_code=new_bench_data.code,
                     step_count=0,
                     transformation_history=[]
                 )
