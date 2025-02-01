@@ -9,6 +9,7 @@ import multiprocessing
 from aas import config as cfg
 from aas.state import OperationState
 from aas.transforms import apply_transformation_with_timeout
+from aas.observation.benchmark import BenchmarkFeatures
 import json
 
 
@@ -218,12 +219,12 @@ def evaluate_code_with_cmd_and_timeout(code: str, tmp_file_path: str, timeout: O
 
 # ================================== Evaluation Functions (Both) ==================================
 
-def evaluate_code_with_timeout(state: OperationState, code: str, tmp_file_path: str, timeout: Optional[float] = None):
+def evaluate_code_with_timeout(bench_features: BenchmarkFeatures, state: OperationState, tmp_file_path: str, timeout: Optional[float] = None):
     """Evaluates the given MLIR code using Python bindings or MLIR opt and MLIR CPU Runner with a timeout.
 
     Args:
+        bench_features (BenchmarkFeatures): The benchmark features.
         state (OperationState): The state to run the Alpha AutoScheduler on.
-        code (str): The MLIR code to run.
         tmp_file_path (str): The temporary file path to write the MLIR code.
         timeout (Optional[float]): The timeout in seconds.
 
@@ -233,6 +234,8 @@ def evaluate_code_with_timeout(state: OperationState, code: str, tmp_file_path: 
         str: the transformed code.
     """
     # Transform the code
+    full_schedule = bench_features.schedule + [state.transformation_history]
+    code = bench_features.code
     for action in state.transformation_history:
         # If code is not None or empty, apply the transformation
         if code:
@@ -254,11 +257,9 @@ def evaluate_code_with_timeout(state: OperationState, code: str, tmp_file_path: 
             exec_db = json.load(f)
             bench_db = exec_db.get(state.bench_name)
             if bench_db:
-                op_db = bench_db.get(state.operation_tag)
-                if op_db:
-                    exec_time = bench_db.get(state.transformation_history_to_str())
-                    if exec_time:
-                        return exec_time, True, code
+                exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
+                if exec_time:
+                    return exec_time, True, code
 
     # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
@@ -273,13 +274,31 @@ def evaluate_code_with_timeout(state: OperationState, code: str, tmp_file_path: 
         if not bench_db:
             bench_db = {}
             exec_db[state.bench_name] = bench_db
-        op_db = bench_db.get(state.operation_tag)
-        if not op_db:
-            op_db = {}
-            bench_db[state.operation_tag] = op_db
-        op_db[state.transformation_history_to_str()] = exec_time
+        exec_db[state.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
         with open(cfg.exec_db_path, "w") as f:
-            json.dump(exec_db, f)
+            json.dump(exec_db, f, indent=2)
 
     # Return the execution time and assertion result and transformed code
     return exec_time, assertion, code
+
+
+def get_cached_exec_time(bench_features: BenchmarkFeatures, state: OperationState):
+    """Get the cached execution time of the given state.
+
+    Args:
+        bench_features (BenchmarkFeatures): The benchmark features.
+        state (OperationState): The state to get the execution time of.
+
+    Returns:
+        Optional[float]: the cached execution time in seconds.
+    """
+    if cfg.exec_db_path:
+        with open(cfg.exec_db_path, "r") as f:
+            exec_db = json.load(f)
+            bench_db = exec_db.get(state.bench_name)
+            if bench_db:
+                full_schedule = bench_features.schedule + [state.transformation_history]
+                exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
+                if exec_time:
+                    return exec_time
+    return None

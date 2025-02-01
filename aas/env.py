@@ -1,5 +1,5 @@
 from aas import config as cfg
-from aas.observation import BenchmarkFeatures, extract_bench_features_from_file, extract_bench_features_from_code
+from aas.observation.benchmark import BenchmarkFeatures, extract_bench_features_from_file, extract_bench_features_from_code
 from aas.state import OperationState
 from aas.agent import AlphaAutoScheduler
 from typing import Optional
@@ -146,7 +146,7 @@ class AASTrainer:
         bench_name, bench_data = self.benchmarks_data[self.bench_index]
 
         # Run the agent
-        optimized_state, optimized_exec_time, assertion, optimized_code = agent.run(state, bench_data.code, bench_data.exec_time)
+        optimized_state, optimized_exec_time, assertion, optimized_code = agent.run(bench_data, state)
         # Print infos and update reward
         if optimized_exec_time is None:
             if optimized_code:
@@ -167,6 +167,8 @@ class AASTrainer:
         terminated = True
         if cfg.optimization_mode == "all":
             op_index = bench_data.operation_tags.index(optimized_state.operation_tag)
+            # Save the schedule of the benchmark
+            bench_schedule = bench_data.schedule
             if op_index > 0:
                 # Benchmark optimization is not over
                 terminated = False
@@ -183,6 +185,9 @@ class AASTrainer:
                     step_count=0,
                     transformation_history=[]
                 )
+            # Update the schedule with the new transformation list
+            _, bench_data = self.benchmarks_data[self.bench_index]
+            bench_data.schedule = bench_schedule + [optimized_state.transformation_history]
 
         # If the benchmark optimization is over, we reset the environment and get the full speedup
         speedup = 1.0

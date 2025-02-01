@@ -1,6 +1,6 @@
 from aas import config as cfg
 from aas.state import OperationState
-from aas.observation import NestedLoopFeatures, extract_op_features_from_code
+from aas.observation.operation import NestedLoopFeatures, extract_op_features_from_code
 from aas.action import Action, Parallelization, Vectorization, NoTransformation
 from utils.log import print_alert
 import os

@@ -4,8 +4,8 @@ from aas.wrappers import AASNetworkManager, AASNetworkEstimation
 from aas.node import Node
 from aas.mcts import MCTS
 from aas.state import OperationState
+from aas.observation.benchmark import BenchmarkFeatures
 from aas.evaluation import evaluate_code_with_timeout
-import math
 import torch
 from typing import Optional
 
@@ -30,13 +30,12 @@ class AlphaAutoScheduler:
         self.tmp_file_path = tmp_file_path
         self.stats = AlphaAutoSchedulerStats()
 
-    def run(self, state: OperationState, full_code: str, root_exec_time: int) -> tuple[OperationState, Optional[int], bool, str]:
+    def run(self, bench_features: BenchmarkFeatures, state: OperationState) -> tuple[OperationState, Optional[int], bool, str]:
         """Run the Alpha AutoScheduler on a given state.
 
         Args:
-            state (OperationState): The state to run the Alpha AutoScheduler on.
-            full_code (str): The code to optimize.
-            root_exec_time (int): Execution time of the code right before optimizing the operation represented by the state given.
+            bench_features (BenchmarkFeatures): The benchmark features.
+            state (OperationState): The initial operation state to optimize.
 
         Returns:
             OperationState: The state after running the Alpha AutoScheduler.
@@ -52,7 +51,7 @@ class AlphaAutoScheduler:
         # Run MCTS searches until a terminal node is reached
         while not node.is_terminal():
             # Get MCTS policy target
-            target_policy_estimation, next_node = self.mcts.run(node, n_iterations=cfg.mcts_nb_iterations)
+            target_policy_estimation, next_node = self.mcts.run(bench_features, node, n_iterations=cfg.mcts_nb_iterations)
             # Save the current state and the target policy estimation and set value to 0 for now
             trajectory.append((node.state, AASNetworkEstimation(
                 policy=target_policy_estimation,
@@ -64,27 +63,18 @@ class AlphaAutoScheduler:
             node = next_node
         # Evaluate the code
         # TODO: Assertion should always be true (do something to check this)
-        exec_time, assertion, transformed_code = evaluate_code_with_timeout(node.state, full_code, self.tmp_file_path)
+        exec_time, assertion, transformed_code = evaluate_code_with_timeout(bench_features, node.state, self.tmp_file_path)
         # If the code execution was successful and the assertion is true
         if (exec_time is not None) and assertion:
             # Get target value
-            target_value = self.get_speedup_reward(root_exec_time, exec_time)
+            target_value = self.network_manager.get_speedup_reward(bench_features, exec_time)
             # Update trajectory with target value
-            for _, aas_estimation in trajectory:
+            print("Trajectory:")
+            for state, aas_estimation in trajectory:
                 aas_estimation.value = torch.tensor(target_value)
+                print("Action:", state.transformation_history[-1] if len(state.transformation_history) > 0 else None)
+                print(aas_estimation)
             # Train the model on the trajectory
             self.network_manager.train_on_trajectory(trajectory)
 
         return node.state, exec_time, assertion, transformed_code
-
-    def get_speedup_reward(self, root_exec_time: int, exec_time: int):
-        """Get the speedup reward based on the execution time.
-
-        Args:
-            root_exec_time (int): The execution time of the root node.
-            exec_time (int): The execution time of the current node.
-
-        Returns:
-            float: The speedup reward.
-        """
-        return math.log(root_exec_time / exec_time, 10)

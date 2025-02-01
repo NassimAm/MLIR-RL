@@ -51,6 +51,12 @@ class AASNetwork(torch.nn.Module):
         # Define the output layers of the value network
         self.value_output_dim = 1
         self.value_network = nn.Sequential(
+            nn.Linear(self.input_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
             nn.Linear(512, 1)
         )
 
@@ -59,7 +65,7 @@ class AASNetwork(torch.nn.Module):
         x = self.backbone(obs)
         select_probs = self.select_network(x)
         parallel_params_probs = torch.concatenate([parallel_params_network(x).unsqueeze(0) for parallel_params_network in self.parallel_params_networks], dim=0)
-        value = self.value_network(x)
+        value = self.value_network(obs)
         return select_probs, parallel_params_probs, value.squeeze(-1)
 
 

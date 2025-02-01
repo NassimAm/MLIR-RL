@@ -12,7 +12,7 @@
 #SBATCH -o /scratch/$NYU_NET_ID/MLIR-RL/logs/train.out
 #SBATCH -e /scratch/$NYU_NET_ID/MLIR-RL/logs/train.err
 
-# Resource requiremenmt commands end here
+# Resource requirement commands end here
 
 #Add the lines for running your code/application
 module load miniconda-nobashrc

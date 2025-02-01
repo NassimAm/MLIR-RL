@@ -1,7 +1,7 @@
 from aas import config as cfg
 from aas.state import OperationState
 from aas.action import Action, Parallelization, Vectorization, NoTransformation
-from typing import Literal, Optional
+from typing import Optional
 import math
 import random
 
@@ -57,22 +57,16 @@ class Node:
         self.children.append(child)
         return child
 
-    def update(self, expected_speedup: float, mode: Literal['VEMS', 'VEAS'] = 'VEMS'):
+    def update(self, expected_speedup: float):
         """Update the node with the actual speedup value in backprobagation after simulation.
 
         Args:
             expected_speedup (float): The expected speedup value to update the node with.
-            mode (Literal['VEMS', 'VEAS']): The update mode. 'VEMS' for max expected speedup and 'VEAS' for average expected speedup. Defaults to 'VEMS'.
         """
         # Update number of visits
         self.nb_visits += 1
         # Get Q value
-        if mode == 'VEMS':
-            self.q = max(self.q, expected_speedup)
-        elif mode == 'VEAS':
-            self.q = (self.q * (self.nb_visits - 1) + expected_speedup) / self.nb_visits
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
+        self.q = (self.q * (self.nb_visits - 1) + expected_speedup) / self.nb_visits
 
     def update_leaf(self, new_value: float):
         """Update the s score of the node with a new value.
@@ -87,15 +81,20 @@ class Node:
         # Update Q value
         self.q = new_value
 
-    def get_s_score(self, c_puct: float = 1.0):
+    def get_s_score(self, c_puct: float = 1.0, random_exploration_temperature: float = 0.0) -> float:
         """Get the s score of the node.
 
         Args:
             c_puct (float): The exploration parameter for the PUCT formula. Defaults to 1.0.
+            random_exploration_temperature (float): The temperature for random exploration. Defaults to 0.0.
 
         Returns:
             float: The s score of the node.
         """
+        # if self.parent is not None:
+        #     return (1 - random_exploration_temperature) * self.q + c_puct * self.node_exploration_factor * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
+        # else:
+        #     return (1 - random_exploration_temperature) * self.q
         if self.parent is not None:
             return self.q + c_puct * self.node_exploration_factor * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
         else:
@@ -108,12 +107,14 @@ class Node:
             list[Action]: The list of available actions.
         """
         transformation_names = [action.name for action in self.state.transformation_history]
-        if self.is_terminal():
-            # If the node is terminal, return an empty list
+        if (Vectorization.DEFAULT_NAME in transformation_names) or (NoTransformation.DEFAULT_NAME in transformation_names):
+            # If vectorization or no transformation is already applied, return an empty list
             return []
         elif Parallelization.DEFAULT_NAME in transformation_names:
             # If parallelization is already applied, return vectorization if possible or no transformation
-            return [NoTransformation()] + ([Vectorization()] if Vectorization.is_possible(self.state.operation_features) else [])
+            parallel_action = next(action for action in self.state.transformation_history if isinstance(action, Parallelization))
+            new_op_features = parallel_action.update_op_features(self.state.operation_features)
+            return ([Vectorization(), NoTransformation()] if Vectorization.is_possible(new_op_features) else [])
         else:  # NOTE: This should only happen if transformation list is empty
             # Get tiling candidates and number of possible combinations
             nb_combinations = 1
@@ -138,7 +139,7 @@ class Node:
                         tmp_comb_id //= len(sub_candidates)
                     combinations.append(combination)
 
-            return [NoTransformation()] + [Parallelization(combination) for combination in combinations] + ([Vectorization()] if Vectorization.is_possible(self.state.operation_features) else [])
+            return [Parallelization(combination) for combination in combinations] + ([Vectorization()] if Vectorization.is_possible(self.state.operation_features) else [])  # + [NoTransformation()]
 
     def is_terminal(self):
         """Check if the node is a terminal node.
@@ -147,7 +148,25 @@ class Node:
             bool: True if the node is terminal, False otherwise.
         """
         transformation_names = [action.name for action in self.state.transformation_history]
-        return (Vectorization.DEFAULT_NAME in transformation_names) or (NoTransformation.DEFAULT_NAME in transformation_names)
+        if (Vectorization.DEFAULT_NAME in transformation_names) or (NoTransformation.DEFAULT_NAME in transformation_names):
+            # If vectorization or no transformation is already applied, the node is terminal
+            return True
+        elif Parallelization.DEFAULT_NAME in transformation_names:
+            # If parallelization is already applied and vectorization is not possible, the node is terminal
+            parallel_action = next(action for action in self.state.transformation_history if isinstance(action, Parallelization))
+            new_op_features = parallel_action.update_op_features(self.state.operation_features)
+            return not Vectorization.is_possible(new_op_features)
+        # Otherwise, the node is not terminal
+        return False
 
-    def __repr__(self):
-        return f"<Node nb_visits={self.nb_visits} s={self.get_s_score()} q={self.q} explore_factor={self.node_exploration_factor}>"
+    def to_str(self, c_puct: float = 1.0, random_exploration_temperature: float = 0.0) -> str:
+        """Get a string representation of the node.
+
+        Args:
+            c_puct (float): The exploration parameter for the PUCT formula. Defaults to 1.0.
+            random_exploration_temperature (float): The temperature for random exploration. Defaults to 0.0.
+
+        Returns:
+            str: The string representation of the node.
+        """
+        return f"<Node nb_visits={self.nb_visits} s={self.get_s_score(c_puct=c_puct, random_exploration_temperature=random_exploration_temperature)} q={self.q} node_p={self.node_exploration_factor} action={self.state.transformation_history[-1] if self.state.transformation_history else None}>"

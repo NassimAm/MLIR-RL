@@ -3,7 +3,9 @@ from aas.node import Node
 from aas.nn import AASNetwork, BSELoss, CrossEntropyLoss
 from aas.action import Action, Parallelization, Vectorization, NoTransformation
 from aas.state import OperationState
+from aas.observation.benchmark import BenchmarkFeatures
 import torch
+from utils.torch_utils import sample_from_dist
 import math
 from typing import Optional
 
@@ -26,31 +28,6 @@ class AASNetworkPolicyEstimation:
         self.select_probs = select_probs
         self.parallel_params_probs = parallel_params_probs
 
-    def get_action_explore_factor(self, action: Action, random_action_temperature: float):
-        """Get the exploration factor of an action given the estimation.
-
-        Args:
-            action (Action): The action to get the exploration factor of.
-            random_action_temperature (float): The temperature parameter for the random action selection.
-
-        Returns:
-            float: The exploration factor of the action."""
-
-        if isinstance(action, Parallelization):
-            parallel_factor = self.select_probs[Parallelization.ID].item()
-            joint_action_factor = parallel_factor
-            for i, param in enumerate(action.params):
-                joint_action_factor *= self.parallel_params_probs[i, (int(math.log2(param)) + 1 if param > 0 else 0)].item()
-            action_factor = random_action_temperature * parallel_factor + (1 - random_action_temperature) * joint_action_factor
-        elif isinstance(action, NoTransformation):
-            action_factor = self.select_probs[NoTransformation.ID].item()
-        elif isinstance(action, Vectorization):
-            action_factor = self.select_probs[Vectorization.ID].item()
-        else:
-            raise ValueError(f'Action {action} is not supported !')
-
-        return action_factor
-
     def get_max_hierarchical_prob_action(self):
         """Get the action with the highest probability in a hierarchical manner given the estimation.
 
@@ -58,20 +35,25 @@ class AASNetworkPolicyEstimation:
             Action: The action with the highest probability."""
         # Disable gradients
         with torch.no_grad():
-            # Get the action with the highest selection probability
-            max_select_id = torch.argmax(self.select_probs).item()
-            if max_select_id == Parallelization.ID:
+            # Sample the action with the given selection probabilities
+            select_id = sample_from_dist(self.select_probs)
+            if select_id == Parallelization.ID:
                 # Get tile sizes for parallelization
                 tile_sizes = []
                 for i in range(cfg.max_num_loops):
-                    max_parallel_id = torch.argmax(self.parallel_params_probs[i]).item()
-                    max_tile_size = 2 ** (max_parallel_id - 1) if max_parallel_id > 0 else 0
-                    tile_sizes.append(max_tile_size)
+                    parallel_id = sample_from_dist(self.parallel_params_probs[i])
+                    tile_size = 2 ** (parallel_id - 1) if parallel_id > 0 else 0
+                    tile_sizes.append(tile_size)
                 return Parallelization(tile_sizes)
-            elif max_select_id == Vectorization.ID:
+            elif select_id == Vectorization.ID:
                 return Vectorization()
             else:
                 return NoTransformation()
+
+    def __repr__(self):
+        """Get the string representation of the AAS network policy estimation."""
+        return (f'Select probs:\n{self.select_probs}\n'
+                f'Parallel params probs:\n{self.parallel_params_probs}')
 
 
 class AASNetworkEstimation:
@@ -92,20 +74,14 @@ class AASNetworkEstimation:
         self.policy = policy
         self.value = value
 
-    def get_action_exploration_factor(self, action: Action, random_action_temperature: float):
-        """Get the exploration factor of an action given the estimation.
-
-        Args:
-            action (Action): The action to get the exploration factor of.
-            random_action_temperature (float): The temperature parameter for the random action selection.
-
-        Returns:
-            float: The exploration factor of the action."""
-        return self.policy.get_action_explore_factor(action, random_action_temperature)
-
     def get_value(self):
         """Get the value of the operation."""
         return self.value
+
+    def __repr__(self):
+        """Get the string representation of the AAS network estimation."""
+        return (f'Policy:\n{self.policy}\n'
+                f'Value: {self.value}')
 
 
 class AASNetworkManagerStats:
@@ -173,6 +149,7 @@ class AASNetworkManager:
             select_probs_pred = select_probs_pred.unsqueeze(0)
             parallel_params_probs_pred = parallel_params_probs_pred.unsqueeze(0)
             value_pred = value_pred.unsqueeze(0)
+            value_pred.retain_grad()
             # Get target tensors
             select_probs_target = target.policy.select_probs.unsqueeze(0)
             parallel_params_probs_target = target.policy.parallel_params_probs.unsqueeze(0)
@@ -180,18 +157,12 @@ class AASNetworkManager:
             # Reset gradients
             self.optimizer.zero_grad()
             # Calculate losses
-            print("Selection")
-            print(select_probs_pred)
-            print(select_probs_target)
-            print("Parallel")
-            print(parallel_params_probs_pred)
-            print(parallel_params_probs_target)
-            print("Value")
-            print(value_pred)
-            print(value_target)
             sl = self.ce_loss(select_probs_pred, select_probs_target)
             ppls = torch.concatenate([self.ce_loss(parallel_params_probs_pred[:, i, :], parallel_params_probs_target[:, i, :]).unsqueeze(0) for i in range(cfg.max_num_loops)])
+            print("Predicted Value: ", value_pred)
+            print("Target Value: ", value_target)
             vl = self.value_loss(value_pred, value_target)
+            print("Value Loss: ", vl)
             # Save losses for stats
             if cfg.logging:
                 self.stats.selection_loss.append(sl.item())
@@ -201,8 +172,47 @@ class AASNetworkManager:
             # Backward pass
             loss = sl + torch.sum(ppls) + vl
             loss.backward()
+            print("Value Grad: ", value_pred.grad)
             # Optimize parameters
             self.optimizer.step()
+
+    def get_action_prob(self, node: Node, action: Action, aas_estimation: Optional[AASNetworkEstimation] = None):
+        """Get the probability of an action given the curent node and the AASNetwork estimation.
+
+        Args:
+            node (Node): The current node just before performing the action.
+            action (Action): The action to calculate the probability of.
+            aas_estimation (Optional[AASNetworkEstimation]): The AASNetwork estimation. Defaults to None.
+            If None, the network model is used to get the estimation.
+
+        Returns:
+            float: The probability of an action given the current node and the AASNetwork estimation.
+        """
+        # Get the action probabilities of the node
+        if aas_estimation is None:
+            with torch.no_grad():
+                select_probs, parallel_params_probs, value = self.model(node.state.to_tensor())
+                aas_estimation = AASNetworkEstimation(
+                    policy=AASNetworkPolicyEstimation(
+                        select_probs=select_probs,
+                        parallel_params_probs=parallel_params_probs
+                    ),
+                    value=value
+                )
+        # Get probability of the node
+        if isinstance(action, Parallelization):
+            action_prob = aas_estimation.policy.select_probs[Parallelization.ID].item()
+            for i, param in enumerate(action.params):
+                param_idx = int(math.log2(param)) + 1 if param > 0 else 0
+                action_prob *= aas_estimation.policy.parallel_params_probs[i, param_idx].item()
+        elif isinstance(action, Vectorization):
+            action_prob = aas_estimation.policy.select_probs[Vectorization.ID].item()
+        elif isinstance(action, NoTransformation):
+            action_prob = aas_estimation.policy.select_probs[NoTransformation.ID].item()
+        else:
+            raise ValueError(f'Action {action} is not supported !')
+
+        return action_prob
 
     def eval_node(self, node: Node) -> AASNetworkEstimation:
         """Evaluate the policy network and value network on a node.
@@ -230,22 +240,6 @@ class AASNetworkManager:
         self.model.train()
         # Return the action probabilities
         return aas_estimation
-
-    def get_action_exploration_factor(self, action: Action, random_action_temperature: float, aas_estimation: Optional[AASNetworkEstimation] = None):
-        """Get the exploration factor of an action given the action probabilities.
-
-        Args:
-            action (Action): The action to get the exploration factor of.
-            random_action_temperature (float): The temperature parameter for the random action selection.
-            aas_estimation (Optional[AASNetworkEstimation]): The estimation made by the AASNetwork. Defaults to None.
-
-        Returns:
-            float: The exploration factor of the action.
-        """
-        if aas_estimation is None:
-            raise NotImplementedError('AASNetwork estimation not provided. This case is not implemented yet !')
-
-        return aas_estimation.get_action_exploration_factor(action, random_action_temperature)
 
     def evaluate_tree(self, root: Node, temperature: float):
         """Get the full AASNetwork policy estimation and the action with the highest MCTS probability after the root node.
@@ -295,13 +289,7 @@ class AASNetworkManager:
                 else:
                     raise ValueError(f'Action {child_action} is not supported !')
             # Correct parallelization parameters probabilities by calculating conditional probabilities
-            print("Before correction")
-            print(parallel_params_probs)
             parallel_prob_by_loop = parallel_params_probs.sum(dim=1)
-            print("Parallel prob by loop")
-            print(parallel_prob_by_loop)
-            print("Parallel prob")
-            print(parallel_prob)
             select_probs[Parallelization.ID] = parallel_prob
             for i in range(cfg.max_num_loops):
                 if parallel_prob_by_loop[i] > 0:
@@ -310,10 +298,6 @@ class AASNetworkManager:
                 else:
                     # If the prior probability of select the loop is zero, set probability of not tiling to 1
                     parallel_params_probs[i, 0] = 1.0
-            print("After correction")
-            print(parallel_params_probs)
-            print("Available actions")
-            print(len(children_dict.keys()))
         # Create the AASNetwork policy estimation
         aas_policy_estimation = AASNetworkPolicyEstimation(
             select_probs=select_probs,
@@ -346,3 +330,18 @@ class AASNetworkManager:
             select_probs=select_probs,
             parallel_params_probs=parallel_params_probs
         )
+
+    def get_speedup_reward(self, bench_features: BenchmarkFeatures, exec_time: int):
+        """Get the speedup reward based on the execution time.
+
+        Args:
+            bench_features (BenchmarkFeatures): The benchmark features.
+            exec_time (int): The execution time of the current node.
+
+        Returns:
+            float: The speedup reward.
+        """
+        root_exec_time = bench_features.exec_time
+        # return math.log(root_exec_time / exec_time, 10)
+        return math.log(root_exec_time / exec_time, 2)
+        # return max(-1.0, ((root_exec_time - exec_time) / root_exec_time))

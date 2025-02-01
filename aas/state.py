@@ -1,5 +1,5 @@
 from aas import config as cfg
-from aas.observation import OperationFeatures, formula_str_to_list
+from aas.observation.operation import OperationFeatures, formula_str_to_list
 from aas.action import Action, Parallelization
 import torch
 import math
@@ -33,12 +33,13 @@ class OperationState:
         Returns:
             int: The observation tensor dimension.
         """
-        # TODO: Update this when adding new transformations other than parallelization
+        # TODO: Update this when adding new transformations
         L = cfg.max_num_loops
         SL = cfg.max_num_stores_loads
         LSD = cfg.max_num_load_store_dim
-        T = cfg.num_tile_sizes
-        return 6 + 5 + 1 + L * 2 + SL * LSD * L + LSD * L + L * (T + 1)
+        TS = cfg.num_tile_sizes
+        NT = cfg.num_transformations
+        return 6 + 5 + 1 + L * 2 + SL * LSD * L + LSD * L + NT + L * (TS + 1)
 
     def to_tensor(self):
         """Convert the operation state to a torch tensor.
@@ -104,19 +105,23 @@ class OperationState:
                     n = indices_dim[index]
                     store_access_matrices[m, n] = factor
 
-            # Action history (size = max_num_loops * (num_tile_sizes + 1))
-            # TODO: Update this when adding new transformations other than parallelization
-            action_history = torch.zeros((cfg.max_num_loops, cfg.num_tile_sizes + 1))
+            # TODO: Update this when adding new transformations
+            # Action history (size = num_transformations)
+            action_history = torch.zeros(cfg.num_transformations)
+            for action in self.transformation_history:
+                action_history[action.id] = 1
+            # Parallelization history (size = max_num_loops * (num_tile_sizes + 1))
+            parallelization_history = torch.zeros((cfg.max_num_loops, cfg.num_tile_sizes + 1))
             for action in self.transformation_history:
                 if isinstance(action, Parallelization):
                     for i, param in enumerate(action.params):
                         idx = int(math.log2(param)) + 1 if param > 0 else 0
-                        action_history[i, idx] = 1
+                        parallelization_history[i, idx] = 1
             # Reshape tensors if needed
             nested_loops = nested_loops.reshape(-1)
             load_access_matrices = load_access_matrices.reshape(-1)
             store_access_matrices = store_access_matrices.reshape(-1)
-            action_history = action_history.reshape(-1)
+            parallelization_history = parallelization_history.reshape(-1)
 
             # Concatenate the feature vectors
             feature_vector = torch.concatenate([
@@ -126,7 +131,8 @@ class OperationState:
                 nested_loops,
                 load_access_matrices,
                 store_access_matrices,
-                action_history
+                action_history,
+                parallelization_history
             ])
 
         return feature_vector
@@ -140,21 +146,15 @@ class OperationState:
         Returns:
             OperationState: The next state of the environment.
         """
-        new_op_features = self.operation_features
-        if isinstance(action, Parallelization):
-            new_op_features = action.update_op_features(self.operation_features)
         return OperationState(
             bench_name=self.bench_name,
             operation_tag=self.operation_tag,
-            operation_features=new_op_features,
+            operation_features=self.operation_features,
             step_count=self.step_count + 1,
             transformation_history=self.transformation_history + [action]
         )
 
-    def transformation_history_to_str(self):
-        """Convert the transformation history to a string.
-
-        Returns:
-            str: The transformation history as a string.
-        """
-        return ''.join([str(action) for action in self.transformation_history])
+    def __repr__(self):
+        return f"OperationState(bench_name={self.bench_name}, operation_tag={self.operation_tag}, " \
+               f"operation_features={self.operation_features}, step_count={self.step_count}, " \
+               f"transformation_history={self.transformation_history})"

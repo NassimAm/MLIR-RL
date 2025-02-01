@@ -1,19 +1,28 @@
 from aas import config as cfg
-from aas.observation import OperationFeatures, NestedLoopFeatures
+from aas.observation.operation import OperationFeatures
 
 
 class Action:
     """Class to represent a transformation as an agent action."""
+    _id: int
+    """The ID of the transformation"""
     _name: str
     """The name of the transformation"""
 
-    def __init__(self, name: str):
+    def __init__(self, id: int, name: str):
         """Initialize a new action.
 
         Args:
+            id (int): The ID of the transformation.
             name (str): The name of the transformation.
         """
+        self._id = id
         self._name = name
+
+    @property
+    def id(self):
+        """The ID of the transformation."""
+        return self._id
 
     @property
     def name(self):
@@ -37,14 +46,15 @@ class ParameterizedAction(Action):
     params: list[int]
     """The parameters of the transformation"""
 
-    def __init__(self, name: str, params: list[int]):
+    def __init__(self, id: int, name: str, params: list[int]):
         """Initialize a new parameterized action.
 
         Args:
+            id (int): The ID of the transformation.
             name (str): The name of the transformation.
             params (list[int]): The parameters of the transformation.
         """
-        super().__init__(name)
+        super().__init__(id, name)
         self.params = params
 
     def __repr__(self):
@@ -65,7 +75,7 @@ class Parallelization(ParameterizedAction):
         Args:
             params (list[int]): The parameters of the transformation.
         """
-        super().__init__(Parallelization.DEFAULT_NAME, params)
+        super().__init__(Parallelization.ID, Parallelization.DEFAULT_NAME, params)
 
     def generate_tiling_combinations(candidates: list[list[int]]):
         """Generate all possible tiling combinations from the list of candidates.
@@ -101,7 +111,7 @@ class Parallelization(ParameterizedAction):
             # If the data format is json and the iterator type is reduction, we don't do tiling
             # TODO: the condition has to change because it's not related to the data format, it's related to a non thread safe tiling problem
             # so we skip it to not let it happen for now
-            elif cfg.data_format == 'json' and nested_loop.iterator_type == 'reduction':
+            if cfg.data_format == 'json' and nested_loop.iterator_type == 'reduction':
                 sub_candidates = [0]
             else:
                 # We take the divisors of the upperbound
@@ -124,22 +134,14 @@ class Parallelization(ParameterizedAction):
         Args:
             operation_features (OperationFeatures): The operation features to update.
         """
-        nested_loops = []
         op_iter_space_size = operation_features.op_iter_space_size
-        for i, nested_loop in enumerate(operation_features.nested_loops):
-            nested_loops.append(NestedLoopFeatures(
-                arg=nested_loop.arg,
-                lower_bound=nested_loop.lower_bound,
-                upper_bound=nested_loop.upper_bound if self.params[i] == 0 else nested_loop.upper_bound // self.params[i],
-                step=nested_loop.step,
-                iterator_type=nested_loop.iterator_type
-            ))
+        for i in range(len(operation_features.nested_loops)):
             op_iter_space_size //= self.params[i] if self.params[i] != 0 else 1
         return OperationFeatures(
             operation_type=operation_features.operation_type,
             op_count=operation_features.op_count,
             op_iter_space_size=op_iter_space_size,
-            nested_loops=nested_loops,
+            nested_loops=operation_features.nested_loops,
             load_data=operation_features.load_data,
             store_data=operation_features.store_data
         )
@@ -155,7 +157,7 @@ class Vectorization(Action):
 
     def __init__(self):
         """Initialize a new vectorization action."""
-        super().__init__(Vectorization.DEFAULT_NAME)
+        super().__init__(Vectorization.ID, Vectorization.DEFAULT_NAME)
 
     def is_possible(operation_features: OperationFeatures):
         return operation_features.op_iter_space_size <= cfg.vect_size_limit
@@ -171,4 +173,4 @@ class NoTransformation(Action):
 
     def __init__(self):
         """Initialize a new no transformation action."""
-        super().__init__(NoTransformation.DEFAULT_NAME)
+        super().__init__(NoTransformation.ID, NoTransformation.DEFAULT_NAME)
