@@ -115,7 +115,7 @@ class OperationState:
             for action in self.transformation_history:
                 if isinstance(action, Parallelization):
                     for i, param in enumerate(action.params):
-                        idx = int(math.log2(param)) + 1 if param > 0 else 0
+                        idx = Parallelization.get_param_id(param)
                         parallelization_history[i, idx] = 1
             # Reshape tensors if needed
             nested_loops = nested_loops.reshape(-1)

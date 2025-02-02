@@ -1,5 +1,6 @@
 from aas import config as cfg
 from aas.observation.operation import OperationFeatures
+import math
 
 
 class Action:
@@ -77,6 +78,17 @@ class Parallelization(ParameterizedAction):
         """
         super().__init__(Parallelization.ID, Parallelization.DEFAULT_NAME, params)
 
+    def get_param_id(param: int):
+        """Get the ID of the parameter.
+
+        Args:
+            param (int): The parameter to get the ID for.
+
+        Returns:
+            int: The ID of the parameter.
+        """
+        return int(math.log2(param)) + 1 if param > 0 else 0
+
     def generate_tiling_combinations(candidates: list[list[int]]):
         """Generate all possible tiling combinations from the list of candidates.
 
@@ -134,9 +146,9 @@ class Parallelization(ParameterizedAction):
         Args:
             operation_features (OperationFeatures): The operation features to update.
         """
-        op_iter_space_size = operation_features.op_iter_space_size
-        for i in range(len(operation_features.nested_loops)):
-            op_iter_space_size //= self.params[i] if self.params[i] != 0 else 1
+        op_iter_space_size = 1
+        for i, nested_loop in enumerate(operation_features.nested_loops):
+            op_iter_space_size *= self.params[i] if self.params[i] != 0 else nested_loop.upper_bound
         return OperationFeatures(
             operation_type=operation_features.operation_type,
             op_count=operation_features.op_count,

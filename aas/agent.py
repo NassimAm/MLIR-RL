@@ -39,6 +39,7 @@ class AlphaAutoScheduler:
 
         Returns:
             OperationState: The state after running the Alpha AutoScheduler.
+            float: The reward of the optimized code.
             Optional[int]: The execution time of the optimized code.
             bool: Whether the assertion was successful.
             str: The transformed and optimized code.
@@ -61,20 +62,26 @@ class AlphaAutoScheduler:
             next_node.node_exploration_factor = 1.0
             next_node.parent = None
             node = next_node
+        # Add the terminal node to the trajectory
+        trajectory.append((node.state, AASNetworkEstimation(
+            policy=self.network_manager.get_no_action_aas_policy_estimation(),
+            value=torch.tensor(0.0)
+        )))
         # Evaluate the code
         # TODO: Assertion should always be true (do something to check this)
         exec_time, assertion, transformed_code = evaluate_code_with_timeout(bench_features, node.state, self.tmp_file_path)
         # If the code execution was successful and the assertion is true
+        reward = 0.0
         if (exec_time is not None) and assertion:
             # Get target value
-            target_value = self.network_manager.get_speedup_reward(bench_features, exec_time)
+            reward = self.network_manager.get_speedup_reward(bench_features, exec_time)
             # Update trajectory with target value
             print("Trajectory:")
             for state, aas_estimation in trajectory:
-                aas_estimation.value = torch.tensor(target_value)
+                aas_estimation.value = torch.tensor(reward)
                 print("Action:", state.transformation_history[-1] if len(state.transformation_history) > 0 else None)
                 print(aas_estimation)
             # Train the model on the trajectory
             self.network_manager.train_on_trajectory(trajectory)
 
-        return node.state, exec_time, assertion, transformed_code
+        return node.state, reward, exec_time, assertion, transformed_code

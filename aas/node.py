@@ -81,12 +81,11 @@ class Node:
         # Update Q value
         self.q = new_value
 
-    def get_s_score(self, c_puct: float = 1.0, random_exploration_temperature: float = 0.0) -> float:
+    def get_s_score(self, c_puct: float = 1.0) -> float:
         """Get the s score of the node.
 
         Args:
             c_puct (float): The exploration parameter for the PUCT formula. Defaults to 1.0.
-            random_exploration_temperature (float): The temperature for random exploration. Defaults to 0.0.
 
         Returns:
             float: The s score of the node.
@@ -124,10 +123,14 @@ class Node:
             # Generate tiling combinations
             combinations = []
             if cfg.mcts_max_num_tile_combinations < 0:
+                # Get all possible tiling combinations
                 combinations = Parallelization.generate_tiling_combinations(candidates)
+                # # Shuffle the combinations for more randomness (encourages exploration)
+                # random.shuffle(combinations)
             else:
+                # Get a random subset of possible tiling combinations
                 seen_combination_ids = set()
-                for i in min(nb_combinations, cfg.mcts_max_num_tile_combinations):
+                for _ in min(nb_combinations, cfg.mcts_max_num_tile_combinations):
                     combination_id = random.randint(0, nb_combinations - 1)
                     while combination_id in seen_combination_ids:
                         combination_id = random.randint(0, nb_combinations - 1)
@@ -159,7 +162,7 @@ class Node:
         # Otherwise, the node is not terminal
         return False
 
-    def to_str(self, c_puct: float = 1.0, random_exploration_temperature: float = 0.0) -> str:
+    def to_str(self, c_puct: float = 1.0) -> str:
         """Get a string representation of the node.
 
         Args:
@@ -169,4 +172,4 @@ class Node:
         Returns:
             str: The string representation of the node.
         """
-        return f"<Node nb_visits={self.nb_visits} s={self.get_s_score(c_puct=c_puct, random_exploration_temperature=random_exploration_temperature)} q={self.q} node_p={self.node_exploration_factor} action={self.state.transformation_history[-1] if self.state.transformation_history else None}>"
+        return f"<Node nb_visits={self.nb_visits} s={self.get_s_score(c_puct=c_puct)} q={self.q} node_p={self.node_exploration_factor} action={self.state.transformation_history[-1] if self.state.transformation_history else None}>"

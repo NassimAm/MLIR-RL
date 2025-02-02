@@ -49,7 +49,7 @@ class MCTS:
         node = root
         while node.children:
             # Get the child node with the highest S score with random tie breaking
-            scores = np.array([child.get_s_score(self.c_puct, self.random_exploration_temperature) for child in node.children])
+            scores = np.array([child.get_s_score(self.c_puct) for child in node.children])
             node_id = np.random.choice(np.flatnonzero(scores == scores.max())).item()
             node = node.children[node_id]
         return node
@@ -75,19 +75,22 @@ class MCTS:
         node.update_leaf(node_value)
         # Get available actions
         available_actions = node.get_available_actions()
-        # sum_node_factors = 0
+        child_node_factors = []
         for action in available_actions:
             # Get next state
             next_state = node.state.next(action)
             # Process child node exploration factor
-            child_node_p = self.aas_network_manager.get_action_prob(node.state, action, aas_estimation)
-            # sum_node_factors += child_node_factor
-            child_node_factor = self.random_exploration_temperature * 1 + (1 - self.random_exploration_temperature) * child_node_p
+            child_node_factor = self.aas_network_manager.get_action_prob(node.state, action, aas_estimation)
+            child_node_factors.append(child_node_factor)
+            # child_node_factor = self.random_exploration_temperature * 1 + (1 - self.random_exploration_temperature) * child_node_p
             # Add child node to the tree
             node.add_child(next_state, child_node_factor)
-        # Normalize node factors
-        # for child in node.children:
-        #     child.node_exploration_factor /= sum_node_factors
+        # Normalize node factors and add dirichlet noise
+        child_node_factors = np.array(child_node_factors)
+        child_node_factors = child_node_factors / np.sum(child_node_factors)
+        child_node_factors = 0.75 * child_node_factors + 0.25 * np.random.dirichlet([0.03] * len(available_actions))
+        for i, child in enumerate(node.children):
+            child.node_exploration_factor = child_node_factors[i].item()
 
     def backpropagate(self, node: Node):
         """Backpropagate the speedup value up the MCTS tree.
@@ -118,11 +121,12 @@ class MCTS:
             node = self.select(root)
             self.expand(bench_features, node)
             self.backpropagate(node)
-        print("Root node:", root.to_str(self.c_puct, self.random_exploration_temperature))
+        print("Root node:", root.to_str(self.c_puct))
         # Calculate next policy estimation
         aas_policy_estimation, max_p_node = self.aas_network_manager.evaluate_tree(root, self.action_temperature)
-        print("Selected node:", max_p_node.to_str(self.c_puct, self.random_exploration_temperature))
-        print("Max visits node:", max(root.children, key=lambda x: x.nb_visits).to_str(self.c_puct, self.random_exploration_temperature))
+        print("Selected node:", max_p_node.to_str(self.c_puct))
+        print("Max nb visits node:", max(root.children, key=lambda x: x.nb_visits).to_str(self.c_puct))
+        print("Max q node:", max(root.children, key=lambda x: x.q).to_str(self.c_puct))
         # Update temperatures
         self.action_temperature *= self.action_temperature_decay
         self.random_exploration_temperature *= self.random_exploration_temperature_decay

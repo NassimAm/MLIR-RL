@@ -146,7 +146,7 @@ class AASTrainer:
         bench_name, bench_data = self.benchmarks_data[self.bench_index]
 
         # Run the agent
-        optimized_state, optimized_exec_time, assertion, optimized_code = agent.run(bench_data, state)
+        optimized_state, reward, optimized_exec_time, assertion, optimized_code = agent.run(bench_data, state)
         # Print infos and update reward
         if optimized_exec_time is None:
             if optimized_code:
@@ -159,6 +159,7 @@ class AASTrainer:
                 print_success(f"ABSOLUTE SPEEDUP: {bench_data.root_exec_time / optimized_exec_time}")
                 print_success(f"OLD EXECUTION TIME: {bench_data.exec_time}")
                 print_success(f"NEW EXECUTION TIME: {optimized_exec_time}")
+                print_success("REWARD:", reward)
                 print_success("ACTIONS", optimized_state.transformation_history)
             else:
                 print_error(f"ASSERTION FAILED ({optimized_state.bench_name} {optimized_state.operation_tag}): {optimized_state.transformation_history}")
