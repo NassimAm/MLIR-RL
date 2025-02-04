@@ -236,6 +236,7 @@ class AASOpEnv:
             root_exec_time = bench_features.root_exec_time
             speedup1 = root_exec_time / exec_time1 if exec_time1 is not None and assertion1 else 1.0
             speedup2 = root_exec_time / exec_time2 if exec_time2 is not None and assertion2 else 1.0
+            print_info(f"Speedup1: {speedup1}, Speedup2: {speedup2}")
             # Calculate score based on ratio between speedups (positive score = keep new agent, negative score = keep old agent)
             score += speedup1 / speedup2 if speedup1 >= speedup2 else -speedup2 / speedup1
         # Return the score
@@ -321,6 +322,7 @@ class AASTrainer:
             # Compare between the current agent and the previous one
             print_info("Started comparison ...")
             score = self.env.compare(self.agent, self.prev_agent)
+            print_info("Score:", score)
             # If the agent did not improve, load the previous agent
             if score < 0:
                 # Load the previous agent

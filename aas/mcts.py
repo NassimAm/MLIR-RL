@@ -47,8 +47,11 @@ class MCTS:
         """
         node = root
         while len(node.children) > 0:
+            # Get dirichlet noise for the children
+            noises = np.random.dirichlet([0.03] * len(node.children))
+            # Calculate S scores
+            scores = np.array([child.get_s_score(self.c_puct, noise=noises[i].item()) for i, child in enumerate(node.children)])
             # Get the child node with the highest S score with random tie breaking
-            scores = np.array([child.get_s_score(self.c_puct) for child in node.children])
             node_id = np.random.choice(np.flatnonzero(scores == scores.max())).item()
             node = node.children[node_id]
         return node
@@ -73,21 +76,18 @@ class MCTS:
         node.update_leaf(node_value)
         # Get available actions
         available_actions = node.get_available_actions()
-        child_node_factors = []
+        sum_child_node_factors = 0.0
         for action in available_actions:
             # Get next state
             next_state = node.state.next(action)
             # Process child node exploration factor
             child_node_factor = self.aas_network_wrapper.get_action_prob(node.state, action, aas_estimation)
-            child_node_factors.append(child_node_factor)
+            sum_child_node_factors += child_node_factor
             # Add child node to the tree
             node.add_child(next_state, child_node_factor)
-        # Normalize node factors and add dirichlet noise
-        child_node_factors = np.array(child_node_factors)
-        child_node_factors = child_node_factors / np.sum(child_node_factors)
-        child_node_factors = 0.75 * child_node_factors + 0.25 * np.random.dirichlet([0.03] * len(available_actions))
-        for i, child in enumerate(node.children):
-            child.node_exploration_factor = child_node_factors[i].item()
+        # Normalize node factors
+        for child in node.children:
+            child.node_exploration_factor /= sum_child_node_factors
 
     def backpropagate(self, node: Node):
         """Backpropagate the speedup value up the MCTS tree.

@@ -85,11 +85,12 @@ class Node:
         """Increments the number of visits of the node."""
         self.nb_visits += 1
 
-    def get_s_score(self, c_puct: float = 1.0) -> float:
+    def get_s_score(self, c_puct: float = 1.0, noise: Optional[float] = None) -> float:
         """Get the s score of the node.
 
         Args:
             c_puct (float): The exploration parameter for the PUCT formula. Defaults to 1.0.
+            noise (Optional[float]): The noise to add to the node exploration factor. Defaults to None.
 
         Returns:
             float: The s score of the node.
@@ -99,7 +100,10 @@ class Node:
         # else:
         #     return (1 - random_exploration_temperature) * self.q
         if self.parent is not None:
-            return self.q + c_puct * self.node_exploration_factor * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
+            p = self.node_exploration_factor
+            if noise is not None:
+                p = 0.75 * p + 0.25 * noise
+            return self.q + c_puct * p * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
         else:
             return self.q
 
