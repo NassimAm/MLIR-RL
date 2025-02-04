@@ -57,16 +57,16 @@ class Node:
         self.children.append(child)
         return child
 
-    def update(self, expected_speedup: float):
-        """Update the node with the actual speedup value in backprobagation after simulation.
+    def update(self, value: float):
+        """Update the node with the given value that was backpropagated during MCTS backpropagation phase.
 
         Args:
-            expected_speedup (float): The expected speedup value to update the node with.
+            value (float): The value to update the node with.
         """
         # Update number of visits
         self.nb_visits += 1
         # Get Q value
-        self.q = (self.q * (self.nb_visits - 1) + expected_speedup) / self.nb_visits
+        self.q = (self.q * (self.nb_visits - 1) + value) / self.nb_visits
 
     def update_leaf(self, new_value: float):
         """Update the s score of the node with a new value.
@@ -77,9 +77,13 @@ class Node:
         """
         # If node is not a leaf, raise an exception
         if self.children:
-            raise Exception("The current node is not a leaf as it contains children.")
+            raise Exception("The current node is not a leaf as it has children.")
         # Update Q value
         self.q = new_value
+
+    def update_visits_count(self):
+        """Increments the number of visits of the node."""
+        self.nb_visits += 1
 
     def get_s_score(self, c_puct: float = 1.0) -> float:
         """Get the s score of the node.

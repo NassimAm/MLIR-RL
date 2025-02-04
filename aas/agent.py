@@ -1,13 +1,10 @@
 from aas import config as cfg
 from aas.nn import AASNetwork
-from aas.wrappers import AASNetworkManager, AASNetworkEstimation
+from aas.wrappers import AASNetworkWrapper, AASNetworkPolicyEstimation, AASNetworkEstimation
 from aas.node import Node
 from aas.mcts import MCTS
 from aas.state import OperationState
-from aas.observation.benchmark import BenchmarkFeatures
-from aas.evaluation import evaluate_code_with_timeout
-import torch
-from typing import Optional
+from typing import Optional, Callable, Literal
 
 
 class AlphaAutoSchedulerStats:
@@ -18,70 +15,78 @@ class AlphaAutoSchedulerStats:
 class AlphaAutoScheduler:
     """The Alpha AutoScheduler class."""
 
-    def __init__(self, tmp_file_path: str):
+    def __init__(self, reward_func: Callable[[OperationState, int], float], network: Optional[AASNetwork] = None):
         """Initialize the Alpha AutoScheduler.
 
         Args:
-            tmp_file_path (str): The temporary file path to write the MLIR code to.
+            reward_func (Callable[[OperationState, int], float]): The reward function used by the training environment
+            network (Optional[AASNetwork], optional): The network to use. Defaults to None.
         """
-        self.network = AASNetwork()
-        self.network_manager = AASNetworkManager(self.network)
-        self.mcts = MCTS(self.network_manager, tmp_file_path)
-        self.tmp_file_path = tmp_file_path
-        self.stats = AlphaAutoSchedulerStats()
+        if network is None:
+            self.network = AASNetwork()
+        else:
+            self.network = network
+        self.network_wrapper = AASNetworkWrapper(self.network)
+        self.mcts = MCTS(self.network_wrapper, reward_func)
+        # self.stats = AlphaAutoSchedulerStats()
 
-    def run(self, bench_features: BenchmarkFeatures, state: OperationState) -> tuple[OperationState, Optional[int], bool, str]:
-        """Run the Alpha AutoScheduler on a given state.
+    def run(self, state: OperationState, mode: Literal['greedy', 'stochastic'] = 'stoachastic'):
+        """Run the Alpha AutoScheduler on a given state and return training data about the trajectory taken by the agent.
 
         Args:
-            bench_features (BenchmarkFeatures): The benchmark features.
             state (OperationState): The initial operation state to optimize.
+            mode (Literal['greedy', 'stochastic'], optional): The mode to run the agent. Defaults to 'stochastic'.
 
         Returns:
-            OperationState: The state after running the Alpha AutoScheduler.
-            float: The reward of the optimized code.
-            Optional[int]: The execution time of the optimized code.
-            bool: Whether the assertion was successful.
-            str: The transformed and optimized code.
+            list[tuple[OperationState, AASNetworkPolicyEstimation]]: The trajectory taken by the agent.
         """
         # Create an MCTS tree with the given state
         root = Node(state)
         node = root
         # Save the trajectory taken by MCTS
-        trajectory: list[tuple[OperationState, AASNetworkEstimation]] = []
+        trajectory: list[tuple[OperationState, AASNetworkPolicyEstimation]] = []
+        # Reset the MCTS algorithm
+        self.mcts.reset()
         # Run MCTS searches until a terminal node is reached
         while not node.is_terminal():
             # Get MCTS policy target
-            target_policy_estimation, next_node = self.mcts.run(bench_features, node, n_iterations=cfg.mcts_nb_iterations)
+            target_policy_estimation, next_node = self.mcts.run(node, n_iterations=cfg.mcts_nb_iterations, mode=mode)
             # Save the current state and the target policy estimation and set value to 0 for now
-            trajectory.append((node.state, AASNetworkEstimation(
-                policy=target_policy_estimation,
-                value=torch.tensor(0.0)
-            )))
+            trajectory.append((node.state, target_policy_estimation))
             # Make the next node the root node
             next_node.node_exploration_factor = 1.0
             next_node.parent = None
             node = next_node
         # Add the terminal node to the trajectory
-        trajectory.append((node.state, AASNetworkEstimation(
-            policy=self.network_manager.get_no_action_aas_policy_estimation(),
-            value=torch.tensor(0.0)
-        )))
-        # Evaluate the code
-        # TODO: Assertion should always be true (do something to check this)
-        exec_time, assertion, transformed_code = evaluate_code_with_timeout(bench_features, node.state, self.tmp_file_path)
-        # If the code execution was successful and the assertion is true
-        reward = 0.0
-        if (exec_time is not None) and assertion:
-            # Get target value
-            reward = self.network_manager.get_speedup_reward(bench_features, exec_time)
-            # Update trajectory with target value
-            print("Trajectory:")
-            for state, aas_estimation in trajectory:
-                aas_estimation.value = torch.tensor(reward)
-                print("Action:", state.transformation_history[-1] if len(state.transformation_history) > 0 else None)
-                print(aas_estimation)
-            # Train the model on the trajectory
-            self.network_manager.train_on_trajectory(trajectory)
+        trajectory.append((node.state, self.network_wrapper.get_no_action_aas_policy_estimation()))
+        # Return the trajectory
+        return trajectory
 
-        return node.state, reward, exec_time, assertion, transformed_code
+    def train(self, data: list[tuple[OperationState, AASNetworkEstimation]]):
+        """Train the Alpha AutoScheduler on given history data.
+
+        Args:
+            data (list[tuple[OperationState, AASNetworkEstimation]]): The history data to train the agent.
+        """
+        self.network_wrapper.train(data)
+
+    def save(self, path: str):
+        """Save the Alpha AutoScheduler to a file.
+
+        Args:
+            path (str): The path to save the network to.
+        """
+        self.network.save(path)
+
+    def load_from_file(path: str, reward_func: Callable[[OperationState, int], float]):
+        """Load the Alpha AutoScheduler from a file.
+
+        Args:
+            path (str): The path to load the network from.
+
+        Returns:
+            AlphaAutoScheduler: The loaded Alpha AutoScheduler.
+        """
+        network = AASNetwork()
+        network.load(path)
+        return AlphaAutoScheduler(reward_func, network=network)

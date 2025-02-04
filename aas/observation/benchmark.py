@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 import os
 import subprocess
-from aas.action import Action
 from aas.observation.operation import OperationFeatures, NestedLoopFeatures
+from aas.action import Action
 
 
 @dataclass
@@ -16,15 +16,11 @@ class BenchmarkFeatures:
     """List of operation tags."""
     operations: dict[str, OperationFeatures]
     """List of operations where each operation is represented by the OperationFeatures dataclass."""
-    exec_time: int
-    """Execution time of the benchmark in nanoseconds."""
     root_exec_time: int
     """Execution time of the benchmark in nanoseconds without any transformation."""
-    schedule: list[list[Action]]
-    """The schedule of the benchmark. Each operation with its list of transformations."""
 
     def any_schedule_to_str(schedule: list[list[Action]]):
-        """Convert the schedule to a string.
+        """Convert a schedule to a string.
 
         Args:
             schedule (list[list[Action]]): The schedule to convert.
@@ -32,25 +28,16 @@ class BenchmarkFeatures:
         Returns:
             str: The schedule as a string.
         """
-        return '|'.join([''.join([str(action) for action in op_actions]) for op_actions in schedule])
-
-    def schedule_to_str(self):
-        """Convert the schedule to a string.
-
-        Returns:
-            str: The schedule as a string.
-        """
-        return BenchmarkFeatures.any_schedule_to_str(self.schedule)
+        return '|'.join(''.join(str(op_action) for op_action in op_schedule) for op_schedule in schedule)
 
 
-def extract_bench_features_from_code(bench_name: str, code: str, root_execution_time: int, execution_time: int):
+def extract_bench_features_from_code(bench_name: str, code: str, root_execution_time: int):
     """Extract benchmark features from the given code.
 
     Args:
         bench_name (str): the benchmark name
         code (str): the code to extract features from
         root_execution_time (int): the root execution time
-        execution_time (int): the execution time
 
     Returns:
         BenchmarkFeatures: the extracted benchmark features
@@ -64,17 +51,16 @@ def extract_bench_features_from_code(bench_name: str, code: str, root_execution_
     )
     raw_ast_info = result.stdout.decode('utf-8')
 
-    return __extract_bench_features_from_ast_result(bench_name, raw_ast_info, root_execution_time, execution_time)
+    return __extract_bench_features_from_ast_result(bench_name, raw_ast_info, root_execution_time)
 
 
-def extract_bench_features_from_file(bench_name: str, file_path: str, root_execution_time: int, execution_time: int):
+def extract_bench_features_from_file(bench_name: str, file_path: str, root_execution_time: int):
     """Extract benchmark features from the code in the file.
 
     Args:
         bench_name (str): the benchmark name
         file_path (str): the file path
         root_execution_time (int): the root execution time
-        execution_time (int): the execution time
 
     Returns:
         BenchmarkFeatures: the extracted benchmark features
@@ -87,17 +73,16 @@ def extract_bench_features_from_file(bench_name: str, file_path: str, root_execu
     )
     raw_ast_info = result.stdout.decode('utf-8')
 
-    return __extract_bench_features_from_ast_result(bench_name, raw_ast_info, root_execution_time, execution_time)
+    return __extract_bench_features_from_ast_result(bench_name, raw_ast_info, root_execution_time)
 
 
-def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str, root_execution_time: int, execution_time: int):
+def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str, root_execution_time: int):
     """Extracts benchmark features from the code's AST result and execution time.
 
     Args:
         bench_name (str): the benchmark name
         raw_ast_info (str): the raw AST information
         root_execution_time (int): the root execution time
-        execution_time (int): the execution time
 
     Returns:
         BenchmarkFeatures: extracted benchmark features
@@ -178,7 +163,5 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
         code=full_code,
         operation_tags=ops_tags,
         operations=operations,
-        root_exec_time=root_execution_time,
-        exec_time=execution_time,
-        schedule=[]
+        root_exec_time=root_execution_time
     )

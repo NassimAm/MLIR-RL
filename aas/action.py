@@ -78,16 +78,27 @@ class Parallelization(ParameterizedAction):
         """
         super().__init__(Parallelization.ID, Parallelization.DEFAULT_NAME, params)
 
-    def get_param_id(param: int):
-        """Get the ID of the parameter.
+    def get_param_id(tile_size: int):
+        """Get the ID of the tile size.
 
         Args:
-            param (int): The parameter to get the ID for.
+            tile_size (int): The tile size to get the ID for.
 
         Returns:
             int: The ID of the parameter.
         """
-        return int(math.log2(param)) + 1 if param > 0 else 0
+        return int(math.log2(tile_size)) + 1 if tile_size > 0 else 0
+
+    def get_tile_size(param_id: int):
+        """Get the tile size from the parameter ID.
+
+        Args:
+            param_id (int): The parameter ID to get the tile size from.
+
+        Returns:
+            int: The tile size.
+        """
+        return 2 ** (param_id - 1) if param_id > 0 else 0
 
     def generate_tiling_combinations(candidates: list[list[int]]):
         """Generate all possible tiling combinations from the list of candidates.

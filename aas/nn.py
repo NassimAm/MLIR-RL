@@ -2,7 +2,7 @@ from aas import config as cfg
 from aas.state import OperationState
 import torch
 import torch.nn as nn
-from typing import Literal
+from typing import Literal, Optional
 
 
 class AASNetwork(torch.nn.Module):
@@ -64,9 +64,25 @@ class AASNetwork(torch.nn.Module):
         """Forward pass of the AAS network."""
         x = self.backbone(obs)
         select_probs = self.select_network(x)
-        parallel_params_probs = torch.concatenate([parallel_params_network(x).unsqueeze(0) for parallel_params_network in self.parallel_params_networks], dim=0)
+        parallel_params_probs = torch.concatenate([parallel_params_network(x).unsqueeze(1) for parallel_params_network in self.parallel_params_networks], dim=1)
         value = self.value_network(obs)
         return select_probs, parallel_params_probs, value.squeeze(-1)
+
+    def save(self, path: str):
+        """Save the AAS network.
+
+        Args:
+            path (str): The path to save the network to.
+        """
+        torch.save(self.state_dict(), path)
+
+    def load(self, path: str):
+        """Load the AAS network.
+
+        Args:
+            path (str): The path to load the network from.
+        """
+        self.load_state_dict(torch.load(path, weights_only=True))
 
 
 class CrossEntropyLoss:
@@ -76,17 +92,20 @@ class CrossEntropyLoss:
         """Initialize the cross-entropy loss function."""
         self.reduction = reduction
 
-    def __call__(self, y_pred: torch.Tensor, y_target: torch.Tensor):
+    def __call__(self, y_pred: torch.Tensor, y_target: torch.Tensor, mask: Optional[torch.Tensor] = None):
         """Compute the cross-entropy loss.
 
         Args:
             y_pred (torch.Tensor): The predicted values.
             y_target (torch.Tensor): The target values.
+            mask (Optional[torch.Tensor], optional): The mask to apply to the loss. Defaults to None.
 
         Returns:
             torch.Tensor: The loss value.
         """
         loss = -torch.sum(y_target * torch.log(y_pred), dim=1)
+        if mask is not None:
+            loss = loss * mask
         if self.reduction == 'mean':
             return loss.mean()
         elif self.reduction == 'sum':

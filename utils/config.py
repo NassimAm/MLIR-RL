@@ -27,7 +27,7 @@ class RASConfig(metaclass=Singleton):
     optimization_mode: Literal["last", "all"]
     """The optimization mode to use, "last" will optimize only the last operation, "all" will optimize all operations in the code. Default is "last"."""
     benchmarks_folder_path: str
-    """Path to the benchmarks folder. Can be empty if optimization mode is set to "last"."""
+    """Path to the benchmarks folder. Can be empty if data format is set to "json"."""
     len_trajectory: int
     """Length of the trajectory"""
     ppo_batch_size: int
@@ -145,24 +145,31 @@ class RASConfig(metaclass=Singleton):
 
 class AASConfig(metaclass=Singleton):
     """Class to store and load global configuration"""
+    # Training and evaluation configuration ========================
     nb_iterations: int
-    """Number of iterations for running the AlphaAutoScheduler agent"""
-    max_num_stores_loads: int
-    """The maximum number of loads in the nested loops"""
-    max_num_loops: int
-    """The max number of nested loops"""
-    max_num_load_store_dim: int
-    """The max number of dimensions in load/store buffers"""
-    num_tile_sizes: int
-    """The number of tile sizes"""
-    num_transformations: int
-    """The number of transformations"""
-    enable_hierarchical_space: bool
-    """Flag to enable hierarchical space for actions"""
+    """Number of iterations for training the AlphaAutoScheduler agent"""
+    data_queue_max_length: int
+    """Maximum number of data points to store in the training queue."""
+    epochs: int
+    """Number of epochs for training the neural network."""
+    batch_size: int
+    """Batch size for training the neural network."""
+    nb_train_eps: int
+    """Number of training episodes per iteration."""
+    nb_eval_eps: int
+    """Number of evaluation episodes per iteration."""
     normalize_features: bool
     """Flag to normalize the features"""
     learning_rate: float
     """Learning rate"""
+    bse_param: float
+    """The Boltzmann squared error parameter. It controls how much close the value would be from the max value.
+    A param close to 0 means that minimizing the error would converge to the mean value, a param that goes to positive infinity means the value would converge to the max value."""
+    bse_relaxation: float
+    """The Boltzmann squared error relaxation parameter. It controls how much the error gradient would relaxed."""
+    enable_hierarchical_space: bool
+    """Flag to enable hierarchical space for actions"""
+    # MCTS configuration ============================================
     mcts_max_num_tile_combinations: int
     """The maximum number of tile combinations to consider in MCTS. If -1, all combinations are considered."""
     mcts_nb_iterations: int
@@ -173,15 +180,20 @@ class AASConfig(metaclass=Singleton):
     """The PUCT constant for MCTS"""
     mcts_action_temperature_decay: float
     """The temperature decay for MCTS action probabilities"""
-    mcts_random_exploration_temperature_decay: float
-    """The temperature decay for MCTS random exploration"""
-    bse_param: float
-    """The Boltzmann squared error parameter. It controls how much close the value would be from the max value.
-    A param close to 0 means that minimizing the error would converge to the mean value, a param that goes to positive infinity means the value would converge to the max value."""
-    bse_relaxation: float
-    """The Boltzmann squared error relaxation parameter. It controls how much the error gradient would relaxed."""
+    # MLIR code features configuration ==============================
+    max_num_stores_loads: int
+    """The maximum number of loads in the nested loops"""
+    max_num_loops: int
+    """The max number of nested loops"""
+    max_num_load_store_dim: int
+    """The max number of dimensions in load/store buffers"""
+    num_tile_sizes: int
+    """The number of tile sizes"""
+    num_transformations: int
+    """The number of transformations"""
     vect_size_limit: int
     """Vectorization size limit to prevent large sizes vectorization"""
+    # Data and execution configuration ==============================
     use_bindings: bool
     """Flag to enable using python bindings for execution, if False, the execution will be done using the command line. Default is False."""
     use_vectorizer: bool
@@ -196,6 +208,7 @@ class AASConfig(metaclass=Singleton):
     """Path to the JSON file containing the benchmarks code or features."""
     exec_db_path: str
     """Path to the execution database file."""
+    # Neptune configuration =========================================
     tags: list[str]
     """List of tags to add to the neptune experiment"""
     logging: bool
@@ -206,23 +219,27 @@ class AASConfig(metaclass=Singleton):
 
     def __init__(self):
         """Initialize the default values"""
-        self.nb_iterations = 10000
-        self.max_num_stores_loads = 7
-        self.max_num_loops = 7
-        self.max_num_load_store_dim = 7
-        self.num_tile_sizes = 7
-        self.num_transformations = 3
-        self.enable_hierarchical_space = True
+        self.nb_iterations = 1000
+        self.data_queue_max_length = 1024
+        self.epochs = 4
+        self.batch_size = 64
+        self.nb_train_eps = 40
+        self.nb_eval_eps = 10
         self.normalize_features = False
         self.learning_rate = 0.001
+        self.bse_param = 1.5
+        self.bse_relaxation = 0.001
+        self.enable_hierarchical_space = True
         self.mcts_max_num_tile_combinations = -1
         self.mcts_nb_iterations = 1000
         self.mcts_estimation_mode = "VEMS"
         self.mcts_c_puct = 1.0
         self.mcts_action_temperature_decay = 1.0
-        self.mcts_random_exploration_temperature_decay = 0.99
-        self.bse_param = 1.5
-        self.bse_relaxation = 0.001
+        self.max_num_stores_loads = 7
+        self.max_num_loops = 7
+        self.max_num_load_store_dim = 7
+        self.num_tile_sizes = 7
+        self.num_transformations = 3
         self.vect_size_limit = 512
         self.use_bindings = False
         self.use_vectorizer = False
@@ -242,22 +259,26 @@ class AASConfig(metaclass=Singleton):
             config = json.load(f)
         # Set the configuration values
         self.nb_iterations = config["nb_iterations"]
-        self.max_num_stores_loads = config["max_num_stores_loads"]
-        self.max_num_loops = config["max_num_loops"]
-        self.max_num_load_store_dim = config["max_num_load_store_dim"]
-        self.num_tile_sizes = config["num_tile_sizes"]
-        self.num_transformations = config["num_transformations"]
-        self.enable_hierarchical_space = config["enable_hierarchical_space"]
+        self.data_queue_max_length = config["data_queue_max_length"]
+        self.epochs = config["epochs"]
+        self.batch_size = config["batch_size"]
+        self.nb_train_eps = config["nb_train_eps"]
+        self.nb_eval_eps = config["nb_eval_eps"]
         self.normalize_features = config["normalize_features"]
         self.learning_rate = config["learning_rate"]
+        self.bse_param = config["bse_param"]
+        self.bse_relaxation = config["bse_relaxation"]
+        self.enable_hierarchical_space = config["enable_hierarchical_space"]
         self.mcts_max_num_tile_combinations = config["mcts_max_num_tile_combinations"]
         self.mcts_nb_iterations = config["mcts_nb_iterations"]
         self.mcts_estimation_mode = config["mcts_estimation_mode"]
         self.mcts_c_puct = config["mcts_c_puct"]
         self.mcts_action_temperature_decay = config["mcts_action_temperature_decay"]
-        self.mcts_random_exploration_temperature_decay = config["mcts_random_exploration_temperature_decay"]
-        self.bse_param = config["bse_param"]
-        self.bse_relaxation = config["bse_relaxation"]
+        self.max_num_stores_loads = config["max_num_stores_loads"]
+        self.max_num_loops = config["max_num_loops"]
+        self.max_num_load_store_dim = config["max_num_load_store_dim"]
+        self.num_tile_sizes = config["num_tile_sizes"]
+        self.num_transformations = config["num_transformations"]
         self.vect_size_limit = config["vect_size_limit"]
         self.use_bindings = config["use_bindings"]
         self.use_vectorizer = config["use_vectorizer"]
@@ -281,22 +302,26 @@ class AASConfig(metaclass=Singleton):
         """Convert the configuration to a dictionary."""
         return {
             "nb_iterations": self.nb_iterations,
-            "max_num_stores_loads": self.max_num_stores_loads,
-            "max_num_loops": self.max_num_loops,
-            "max_num_load_store_dim": self.max_num_load_store_dim,
-            "num_tile_sizes": self.num_tile_sizes,
-            "num_transformations": self.num_transformations,
-            "enable_hierarchical_space": self.enable_hierarchical_space,
+            "data_queue_max_length": self.data_queue_max_length,
+            "epochs": self.epochs,
+            "batch_size": self.batch_size,
+            "nb_train_eps": self.nb_train_eps,
+            "nb_eval_eps": self.nb_eval_eps,
             "normalize_features": self.normalize_features,
             "learning_rate": self.learning_rate,
+            "bse_param": self.bse_param,
+            "bse_relaxation": self.bse_relaxation,
+            "enable_hierarchical_space": self.enable_hierarchical_space,
             "mcts_max_num_tile_combinations": self.mcts_max_num_tile_combinations,
             "mcts_nb_iterations": self.mcts_nb_iterations,
             "mcts_estimation_mode": self.mcts_estimation_mode,
             "mcts_c_puct": self.mcts_c_puct,
             "mcts_action_temperature_decay": self.mcts_action_temperature_decay,
-            "mcts_random_exploration_temperature_decay": self.mcts_random_exploration_temperature_decay,
-            "bse_param": self.bse_param,
-            "bse_relaxation": self.bse_relaxation,
+            "max_num_stores_loads": self.max_num_stores_loads,
+            "max_num_loops": self.max_num_loops,
+            "max_num_load_store_dim": self.max_num_load_store_dim,
+            "num_tile_sizes": self.num_tile_sizes,
+            "num_transformations": self.num_transformations,
             "vect_size_limit": self.vect_size_limit,
             "use_bindings": self.use_bindings,
             "use_vectorizer": self.use_vectorizer,

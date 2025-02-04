@@ -1,5 +1,6 @@
 from aas import config as cfg
 from aas.observation.operation import OperationFeatures, formula_str_to_list
+from aas.observation.benchmark import BenchmarkFeatures
 from aas.action import Action, Parallelization
 import torch
 import math
@@ -7,8 +8,8 @@ import math
 
 class OperationState:
     """Class to represent the operation state."""
-    bench_name: str
-    """The benchmark's name."""
+    bench_features: BenchmarkFeatures
+    """Benchmark features for the benchmark that the operation is part of."""
     operation_tag: str
     """Tag used to identify the operation in the MLIR code."""
     operation_features: OperationFeatures
@@ -18,10 +19,10 @@ class OperationState:
     transformation_history: list[Action]
     """List of transformations with their parameters applied to the operation."""
 
-    def __init__(self, bench_name: str, operation_tag: str, operation_features: OperationFeatures,
+    def __init__(self, bench_features: str, operation_tag: str, operation_features: OperationFeatures,
                  step_count: int, transformation_history: list[Action]):
         """Initialize the operation state."""
-        self.bench_name = bench_name
+        self.bench_features = bench_features
         self.operation_tag = operation_tag
         self.operation_features = operation_features
         self.step_count = step_count
@@ -147,7 +148,7 @@ class OperationState:
             OperationState: The next state of the environment.
         """
         return OperationState(
-            bench_name=self.bench_name,
+            bench_features=self.bench_features,
             operation_tag=self.operation_tag,
             operation_features=self.operation_features,
             step_count=self.step_count + 1,
@@ -155,6 +156,6 @@ class OperationState:
         )
 
     def __repr__(self):
-        return f"OperationState(bench_name={self.bench_name}, operation_tag={self.operation_tag}, " \
+        return f"OperationState(bench_name={self.bench_features.bench_name}, operation_tag={self.operation_tag}, " \
                f"operation_features={self.operation_features}, step_count={self.step_count}, " \
                f"transformation_history={self.transformation_history})"

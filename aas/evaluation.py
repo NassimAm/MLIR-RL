@@ -219,11 +219,10 @@ def evaluate_code_with_cmd_and_timeout(code: str, tmp_file_path: str, timeout: O
 
 # ================================== Evaluation Functions (Both) ==================================
 
-def evaluate_code_with_timeout(bench_features: BenchmarkFeatures, state: OperationState, tmp_file_path: str, timeout: Optional[float] = None):
+def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeout: Optional[float] = None):
     """Evaluates the given MLIR code using Python bindings or MLIR opt and MLIR CPU Runner with a timeout.
 
     Args:
-        bench_features (BenchmarkFeatures): The benchmark features.
         state (OperationState): The state to run the Alpha AutoScheduler on.
         tmp_file_path (str): The temporary file path to write the MLIR code.
         timeout (Optional[float]): The timeout in seconds.
@@ -233,9 +232,16 @@ def evaluate_code_with_timeout(bench_features: BenchmarkFeatures, state: Operati
         bool: the assertion result.
         str: the transformed code.
     """
+    # Get the code
+    code = state.bench_features.code
+    # Get the full schedule
+    full_schedule = []
+    for op_tag in state.bench_features.operation_tags:
+        if op_tag == state.operation_tag:
+            full_schedule.append(state.transformation_history)
+        else:
+            full_schedule.append([])
     # Transform the code
-    full_schedule = bench_features.schedule + [state.transformation_history]
-    code = bench_features.code
     for action in state.transformation_history:
         # If code is not None or empty, apply the transformation
         if code:
@@ -255,7 +261,7 @@ def evaluate_code_with_timeout(bench_features: BenchmarkFeatures, state: Operati
     if cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
             exec_db = json.load(f)
-            bench_db = exec_db.get(state.bench_name)
+            bench_db = exec_db.get(state.bench_features.bench_name)
             if bench_db:
                 exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
                 if exec_time:
@@ -263,18 +269,18 @@ def evaluate_code_with_timeout(bench_features: BenchmarkFeatures, state: Operati
 
     # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
-        exec_time, assertion = evaluate_code_with_bindings_and_timeout(code, state.bench_name, timeout=timeout)
+        exec_time, assertion = evaluate_code_with_bindings_and_timeout(code, state.bench_features.bench_name, timeout=timeout)
     else:
         exec_time, assertion = evaluate_code_with_cmd_and_timeout(code, tmp_file_path, timeout=timeout)
     # Store the execution time in the execution database
     if (exec_time is not None) and assertion and cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
             exec_db = json.load(f)
-        bench_db = exec_db.get(state.bench_name)
+        bench_db = exec_db.get(state.bench_features.bench_name)
         if not bench_db:
             bench_db = {}
-            exec_db[state.bench_name] = bench_db
-        exec_db[state.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
+            exec_db[state.bench_features.bench_name] = bench_db
+        exec_db[state.bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
         with open(cfg.exec_db_path, "w") as f:
             json.dump(exec_db, f, indent=2)
 
@@ -282,22 +288,98 @@ def evaluate_code_with_timeout(bench_features: BenchmarkFeatures, state: Operati
     return exec_time, assertion, code
 
 
-def get_cached_exec_time(bench_features: BenchmarkFeatures, state: OperationState):
+def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_path: str, timeout: Optional[float] = None):
+    """Evaluates the given MLIR code using Python bindings or MLIR opt and MLIR CPU Runner with a timeout.
+
+    Args:
+        states (list[OperationState]): The states to run the Alpha AutoScheduler on.
+        tmp_file_path (str): The temporary file path to write the MLIR code.
+        timeout (Optional[float]): The timeout in seconds.
+
+    Returns:
+        Optional[float]: the execution time in seconds.
+        bool: the assertion result.
+        str: the transformed code.
+    """
+    if not states:
+        return None, False, None
+    # Get the code
+    bench_features = states[0].bench_features
+    code = bench_features.code
+    # Get the full schedule
+    full_schedule = []
+    # Transform the code
+    for state in states:
+        for action in state.transformation_history:
+            # If code is not None or empty, apply the transformation
+            if code:
+                code = apply_transformation_with_timeout(
+                    state=state,
+                    code=code,
+                    tmp_file_path=tmp_file_path,
+                    action=action,
+                    timeout=timeout,
+                    use_vectorizer=cfg.use_vectorizer
+                )
+            else:
+                # If code is None or empty, return execution error
+                return None, False, code
+        # Update the full schedule
+        full_schedule.insert(0, state.transformation_history)
+
+    # Check execution database for the execution time of the given state
+    if cfg.exec_db_path:
+        with open(cfg.exec_db_path, "r") as f:
+            exec_db = json.load(f)
+            bench_db = exec_db.get(bench_features.bench_name)
+            if bench_db:
+                exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
+                if exec_time:
+                    return exec_time, True, code
+
+    # Otherwise execute the code manually using Python bindings if enabled
+    if cfg.use_bindings:
+        exec_time, assertion = evaluate_code_with_bindings_and_timeout(code, bench_features.bench_name, timeout=timeout)
+    else:
+        exec_time, assertion = evaluate_code_with_cmd_and_timeout(code, tmp_file_path, timeout=timeout)
+    # Store the execution time in the execution database
+    if (exec_time is not None) and assertion and cfg.exec_db_path:
+        with open(cfg.exec_db_path, "r") as f:
+            exec_db = json.load(f)
+        bench_db = exec_db.get(bench_features.bench_name)
+        if not bench_db:
+            bench_db = {}
+            exec_db[bench_features.bench_name] = bench_db
+        exec_db[bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
+        with open(cfg.exec_db_path, "w") as f:
+            json.dump(exec_db, f, indent=2)
+
+    # Return the execution time and assertion result and transformed code
+    return exec_time, assertion, code
+
+
+def get_cached_exec_time(state: OperationState):
     """Get the cached execution time of the given state.
 
     Args:
-        bench_features (BenchmarkFeatures): The benchmark features.
         state (OperationState): The state to get the execution time of.
 
     Returns:
         Optional[float]: the cached execution time in seconds.
     """
+    # Get the full schedule
+    full_schedule = []
+    for op_tag in state.bench_features.operation_tags:
+        if op_tag == state.operation_tag:
+            full_schedule.append(state.transformation_history)
+        else:
+            full_schedule.append([])
+    # Check execution database for the execution time of the given state
     if cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
             exec_db = json.load(f)
-            bench_db = exec_db.get(state.bench_name)
+            bench_db = exec_db.get(state.bench_features.bench_name)
             if bench_db:
-                full_schedule = bench_features.schedule + [state.transformation_history]
                 exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
                 if exec_time:
                     return exec_time
