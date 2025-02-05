@@ -158,17 +158,7 @@ class Node:
         Returns:
             bool: True if the node is terminal, False otherwise.
         """
-        transformation_names = [action.name for action in self.state.transformation_history]
-        if (Vectorization.DEFAULT_NAME in transformation_names) or (NoTransformation.DEFAULT_NAME in transformation_names):
-            # If vectorization or no transformation is already applied, the node is terminal
-            return True
-        elif Parallelization.DEFAULT_NAME in transformation_names:
-            # If parallelization is already applied and vectorization is not possible, the node is terminal
-            parallel_action = next(action for action in self.state.transformation_history if isinstance(action, Parallelization))
-            new_op_features = parallel_action.update_op_features(self.state.operation_features)
-            return not Vectorization.is_possible(new_op_features)
-        # Otherwise, the node is not terminal
-        return False
+        return self.state.is_terminal()
 
     def to_str(self, c_puct: float = 1.0) -> str:
         """Get a string representation of the node.

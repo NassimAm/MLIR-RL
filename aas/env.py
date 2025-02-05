@@ -12,7 +12,7 @@ import json
 from tqdm import tqdm
 from collections import deque
 import math
-from utils.log import print_info, print_alert, print_success
+from utils.log import print_info, print_alert, print_success, print_error
 import neptune
 
 
@@ -202,17 +202,24 @@ class AASOpEnv:
         # best_speedup = max(2.0, bench_features.best_speedup[state.operation_tag])
         # return max(-1.0, min(1.0, math.log2(speedup / best_speedup)))
 
-    def compare(self, agent1: AlphaAutoScheduler, agent2: AlphaAutoScheduler, neptune_logs: Optional[neptune.Run] = None):
+    def compare(self, agent1: AlphaAutoScheduler, agent2: AlphaAutoScheduler):
         """Compare two agents on a set of benchmarks.
 
         Args:
             agent1 (AlphaAutoScheduler): The first agent to compare.
             agent2 (AlphaAutoScheduler): The second agent to compare.
+
+        Returns:
+            float: The score of the comparison.
+            list[float]: The speedups of the first agent.
+            list[float]: The speedups of the second agent.
         """
         # Run specified number of full benchmark episodes
         score = 0
         state = self.reset()
         terminated = False
+        speedups1 = []
+        speedups2 = []
         for _ in range(cfg.nb_eval_eps):
             last_states1 = []
             last_states2 = []
@@ -238,12 +245,47 @@ class AASOpEnv:
             speedup1 = root_exec_time / exec_time1 if exec_time1 is not None and assertion1 else 1.0
             speedup2 = root_exec_time / exec_time2 if exec_time2 is not None and assertion2 else 1.0
             print_info(f"Speedup1: {speedup1}, Speedup2: {speedup2}")
-            if neptune_logs is not None:
-                neptune_logs['eval/final_speedup'].append(max(speedup1, speedup2))
             # Calculate score based on ratio between speedups (positive score = keep new agent, negative score = keep old agent)
             score += speedup1 / speedup2 if speedup1 >= speedup2 else -speedup2 / speedup1
+            speedups1.append(speedup1)
+            speedups2.append(speedup2)
         # Return the score
-        return score
+        return score, speedups1, speedups2
+
+    def eval(self, agent: AlphaAutoScheduler, mode: Literal['greedy', 'stochastic'] = 'greedy'):
+        """Evaluate the agent on a set of benchmarks.
+
+        Args:
+            agent (AlphaAutoScheduler): The agent to evaluate.
+
+        Returns:
+            float: The average speedup of the agent on the benchmarks.
+        """
+        # Run specified number of full benchmark episodes
+        state = self.reset()
+        terminated = False
+        speedups = []
+        # TODO: make the number of episodes configurable
+        for _ in range(1):
+            optimized_states = []
+            bench_features = state.bench_features
+            while not terminated:
+                # Run the agent on the current state
+                optimized_state = agent.eval(state, mode=mode)
+                # Save the last state in trajectory
+                optimized_states.append(optimized_state)
+                # Take a step in the environment
+                state, terminated = self.step(state)
+            # Evaluate the transformed code
+            exec_time, assertion, _ = evaluate_benchmark_code_with_timeout(optimized_states, self.tmp_file_path)
+            # Calculate speedup
+            root_exec_time = bench_features.root_exec_time
+            if exec_time is not None and assertion:
+                speedup = root_exec_time / exec_time
+                print_info(f"Speedup: {speedup}")
+                speedups.append(speedup)
+        # Return the speedups
+        return speedups
 
 
 class AASTrainer:
@@ -264,12 +306,13 @@ class AASTrainer:
         """
         # Initialize the environment
         if env_type == "op":
-            self.env = AASOpEnv()
+            self.train_env = AASOpEnv()
+            self.eval_env = AASOpEnv()
         else:
             raise ValueError(f"Invalid environment type ({env_type}). Please choose 'op' for operation-wise optimization.")
         # Initialize agents
         self.save_file_path = os.path.join("models", "aas_agent.pt")
-        self.agent = AlphaAutoScheduler(self.env.get_reward)
+        self.agent = AlphaAutoScheduler(self.train_env.get_reward)
         self.agent.save(self.save_file_path)
         self.prev_agent = None
         # Initialize data queue
@@ -278,7 +321,7 @@ class AASTrainer:
     def train(self, neptune_logs: Optional[neptune.Run] = None):
         """Train the agent to optimize benchmarks."""
         # Initialize the environment
-        state = self.env.reset()
+        state = self.train_env.reset()
         # Loop trough iterations
         for _ in tqdm(range(cfg.nb_iterations), desc="Main Loop"):
             # ======================== Gather training data ========================
@@ -292,7 +335,7 @@ class AASTrainer:
                 # Save the trajectory
                 trajectories.append(trajectory)
                 # Take a step in the environment
-                state, _ = self.env.step(state)
+                state, _ = self.train_env.step(state)
             print_info("Number of trajectories:", len(trajectories))
             print_info("Total number of data points:", sum(len(trajectory) for trajectory in trajectories))
             print_info("MCTS search ended ...")
@@ -304,9 +347,9 @@ class AASTrainer:
                 # Get the last state of the trajectory
                 last_state, _ = trajectories[j][-1]
                 # Run the code with last state transformation list
-                exec_time, assertion, _ = evaluate_code_with_timeout(last_state, self.env.tmp_file_path)
+                exec_time, assertion, transformed_code = evaluate_code_with_timeout(last_state, self.train_env.tmp_file_path)
                 # Get the reward
-                value = self.env.get_reward(last_state, exec_time)
+                value = self.train_env.get_reward(last_state, exec_time)
                 # Add the trajectory to the data queue
                 if exec_time is not None and assertion:
                     speedups.append(last_state.bench_features.root_exec_time / exec_time)
@@ -315,35 +358,66 @@ class AASTrainer:
                             policy=trajectory_policy,
                             value=value
                         )))
+                else:
+                    if exec_time is None:
+                        if transformed_code:
+                            print_error(f"EXECUTION ERROR: ({last_state.bench_features.bench_name} {last_state.operation_tag})")
+                            print_error("ACTIONS:", last_state.transformation_history)
+                        else:
+                            print_error(f"TRANSFORMATION ERROR: ({last_state.bench_features.bench_name} {last_state.operation_tag})")
+                            print_error("ACTIONS:", last_state.transformation_history)
+                    else:
+                        print_error(f"ASSERTION FAILED: ({last_state.bench_features.bench_name} {last_state.operation_tag})")
+                        print_error("ACTIONS:", last_state.transformation_history)
             if neptune_logs is not None:
                 neptune_logs['train/final_speedup'].extend(speedups)
             print_info("Average speedup:", sum(speedups) / len(speedups))
             print_info("Max speedup:", max(speedups))
             print_info("Execution ended ...")
 
-            # ======================== Train the agent ========================
+            # ======================== Train the agent =============================
             # Load the previous agent
-            self.prev_agent = AlphaAutoScheduler.load_from_file(self.save_file_path, self.env.get_reward)
+            self.prev_agent = AlphaAutoScheduler.load_from_file(self.save_file_path, self.train_env.get_reward)
             # Train the current agent
             print_info("Started training ...")
-            self.agent.train(list(self.data))
+            train_stats = self.agent.train(list(self.data))
+            if neptune_logs is not None:
+                neptune_logs['train/selection_loss'].extend(train_stats.selection_loss)
+                neptune_logs['train/value_loss'].extend(train_stats.value_loss)
+                for j in range(cfg.max_num_loops):
+                    neptune_logs[f'train/parallel_params_loss_{j}'].extend(train_stats.parallel_params_loss[j])
             print_info("Training ended ...")
 
-            # ======================= Evaluate the agent ======================
+            # ========== Evaluate the agent with MCTS for next training ============
             # Compare between the current agent and the previous one
             print_info("Started comparison ...")
-            score = self.env.compare(self.agent, self.prev_agent, neptune_logs=neptune_logs)
+            score, speedups1, speedups2 = self.eval_env.compare(self.agent, self.prev_agent, neptune_logs=neptune_logs)
             print_info("Score:", score)
             # If the agent did not improve, load the previous agent
             if score < 0:
                 # Load the previous agent
                 self.agent = self.prev_agent
                 print_alert("Agent did not improve, loading the previous agent ...")
+                if neptune_logs is not None:
+                    neptune_logs['eval/comp/final_speedup'].extend(speedups2)
             else:
                 print_success("Agent improved, keeping the current agent ...")
+                if neptune_logs is not None:
+                    neptune_logs['eval/comp/final_speedup'].extend(speedups1)
             print_info("Comparison ended ...")
 
-            # ====================== Save the best agent =======================
+            # ================ Evaluate the agent without MCTS =====================
+            print_info("Started evaluation ...")
+            greedy_speedups = self.eval_env.eval(self.agent, mode='greedy')
+            stochastic_speedups = self.eval_env.eval(self.agent, mode='stochastic')
+            print_info("Greedy speedups average:", sum(greedy_speedups) / len(greedy_speedups) if greedy_speedups else 0.0)
+            print_info("Stochastic speedups average:", sum(stochastic_speedups) / len(stochastic_speedups) if stochastic_speedups else 0.0)
+            if neptune_logs is not None:
+                neptune_logs['eval/greedy/final_speedup'].extend(greedy_speedups)
+                neptune_logs['eval/stochastic/final_speedup'].extend(stochastic_speedups)
+            print_info("Evaluation ended ...")
+
+            # ====================== Save the best agent ===========================
             # Save the best agent so far
             self.agent.save(self.save_file_path)
 

@@ -82,6 +82,27 @@ class AlphaAutoScheduler:
             data (list[tuple[OperationState, AASNetworkEstimation]]): The history data to train the agent.
         """
         self.network_wrapper.train(data)
+        return self.network_wrapper.stats
+
+    def eval(self, state: OperationState, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
+        """Evaluate the Alpha AutoScheduler on a given state.
+
+        Args:
+            state (OperationState): The initial operation state to evaluate.
+            mode (Literal['greedy', 'stochastic'], optional): The mode to evaluate the agent. Defaults to 'stochastic'.
+
+        Returns:
+            OperationState: The final state after the agent has evaluated the state and taken actions.
+        """
+        while not state.is_terminal():
+            # Get the estimation of the current state
+            aas_estimation = self.network_wrapper.eval(state)
+            # Get the action to take
+            action = aas_estimation.policy.get_max_hierarchical_prob_action(mode=mode)
+            # Apply the action to the state
+            state = state.next(action)
+        # Return the final state
+        return state
 
     def save(self, path: str):
         """Save the Alpha AutoScheduler to a file.

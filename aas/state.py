@@ -1,7 +1,7 @@
 from aas import config as cfg
 from aas.observation.operation import OperationFeatures, formula_str_to_list
 from aas.observation.benchmark import BenchmarkFeatures
-from aas.action import Action, Parallelization
+from aas.action import Action, Parallelization, Vectorization, NoTransformation
 import torch
 import math
 
@@ -147,6 +147,8 @@ class OperationState:
         Returns:
             OperationState: The next state of the environment.
         """
+        if self.is_terminal():
+            raise ValueError("Cannot apply action to terminal state.")
         return OperationState(
             bench_features=self.bench_features,
             operation_tag=self.operation_tag,
@@ -154,6 +156,24 @@ class OperationState:
             step_count=self.step_count + 1,
             transformation_history=self.transformation_history + [action]
         )
+
+    def is_terminal(self):
+        """Check if the state is terminal.
+
+        Returns:
+            bool: True if the state is terminal, False otherwise.
+        """
+        transformation_names = [action.name for action in self.transformation_history]
+        if (Vectorization.DEFAULT_NAME in transformation_names) or (NoTransformation.DEFAULT_NAME in transformation_names):
+            # If vectorization or no transformation is already applied, the state is terminal
+            return True
+        elif Parallelization.DEFAULT_NAME in transformation_names:
+            # If parallelization is already applied and vectorization is not possible, the state is terminal
+            parallel_action = next(action for action in self.transformation_history if isinstance(action, Parallelization))
+            new_op_features = parallel_action.update_op_features(self.operation_features)
+            return not Vectorization.is_possible(new_op_features)
+        # Otherwise, the state is not terminal
+        return False
 
     def __repr__(self):
         return f"OperationState(bench_name={self.bench_features.bench_name}, operation_tag={self.operation_tag}, " \

@@ -227,6 +227,12 @@ class AASNetworkWrapper:
                 loss.backward()
                 # Optimize parameters
                 self.optimizer.step()
+            # Save stats
+            if cfg.logging:
+                self.stats.selection_loss.append(sl.item())
+                for i in range(cfg.max_num_loops):
+                    self.stats.parallel_params_loss[i].append(ppls[i].item())
+                self.stats.value_loss.append(vl.item())
 
     def get_action_mask(self, state: OperationState, action: Optional[Action]):
         """Get the mask for the action.
@@ -311,6 +317,34 @@ class AASNetworkWrapper:
             self.model.eval()
             # Make prediction
             select_probs, parallel_params_probs, value = self.model(node.state.to_tensor())
+            # Set model back to training mode
+            self.model.train()
+        # Create the AASNetwork estimation
+        aas_estimation = AASNetworkEstimation(
+            policy=AASNetworkPolicyEstimation(
+                select_probs=select_probs,
+                parallel_params_probs=parallel_params_probs
+            ),
+            value=value
+        )
+        # Return the action probabilities
+        return aas_estimation
+
+    def eval(self, state: OperationState) -> AASNetworkEstimation:
+        """Evaluate the policy network and value network on a node.
+
+        Args:
+            state (OperationState): The state to evaluate.
+
+        Returns:
+            AASNetworkEstimation: The AASNetwork estimation.
+        """
+        # Get the next action probabilities of the node
+        with torch.no_grad():
+            # Set model to evaluation mode
+            self.model.eval()
+            # Make prediction
+            select_probs, parallel_params_probs, value = self.model(state.to_tensor())
             # Set model back to training mode
             self.model.train()
         # Create the AASNetwork estimation
