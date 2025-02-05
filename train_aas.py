@@ -22,7 +22,7 @@ neptune_logs = init_neptune(['aas'] + cfg.tags, cfg_path=os.getenv('AAS_CONFIG_F
 
 # Start training
 print_info('Start training ... ')
-trainer.train()
+trainer.train(neptune_logs=neptune_logs)
 
 # Stop logs if enabled
 if cfg.logging:

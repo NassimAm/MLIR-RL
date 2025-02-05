@@ -26,7 +26,7 @@ class AASNetworkPolicyEstimation:
         self.select_probs = select_probs
         self.parallel_params_probs = parallel_params_probs
 
-    def get_max_hierarchical_prob_action(self, mode: Literal['greedy', 'stochastic'] = 'stoachastic'):
+    def get_max_hierarchical_prob_action(self, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Get the action selected in a hierarchical manner given the estimation.
 
         Args:
@@ -324,7 +324,7 @@ class AASNetworkWrapper:
         # Return the action probabilities
         return aas_estimation
 
-    def evaluate_tree(self, root: Node, temperature: float, mode: Literal['greedy', 'stochastic'] = 'stoachastic'):
+    def evaluate_tree(self, root: Node, temperature: float, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Get the full AASNetwork policy estimation and the action selected given MCTS probabilities after the root node.
 
         Args:

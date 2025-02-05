@@ -5,6 +5,7 @@ from aas.node import Node
 from aas.mcts import MCTS
 from aas.state import OperationState
 from typing import Optional, Callable, Literal
+import multiprocessing.managers
 
 
 class AlphaAutoSchedulerStats:
@@ -22,15 +23,15 @@ class AlphaAutoScheduler:
             reward_func (Callable[[OperationState, int], float]): The reward function used by the training environment
             network (Optional[AASNetwork], optional): The network to use. Defaults to None.
         """
+        self.reward_func = reward_func
         if network is None:
             self.network = AASNetwork()
         else:
             self.network = network
         self.network_wrapper = AASNetworkWrapper(self.network)
-        self.mcts = MCTS(self.network_wrapper, reward_func)
         # self.stats = AlphaAutoSchedulerStats()
 
-    def run(self, state: OperationState, mode: Literal['greedy', 'stochastic'] = 'stoachastic'):
+    def run(self, state: OperationState, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Run the Alpha AutoScheduler on a given state and return training data about the trajectory taken by the agent.
 
         Args:
@@ -46,11 +47,11 @@ class AlphaAutoScheduler:
         # Save the trajectory taken by MCTS
         trajectory: list[tuple[OperationState, AASNetworkPolicyEstimation]] = []
         # Reset the MCTS algorithm
-        self.mcts.reset()
+        mcts = MCTS(self.network_wrapper, self.reward_func)
         # Run MCTS searches until a terminal node is reached
         while not node.is_terminal():
             # Get MCTS policy target
-            target_policy_estimation, next_node = self.mcts.run(node, n_iterations=cfg.mcts_nb_iterations, mode=mode)
+            target_policy_estimation, next_node = mcts.run(node, n_iterations=cfg.mcts_nb_iterations, mode=mode)
             # Save the current state and the target policy estimation and set value to 0 for now
             trajectory.append((node.state, target_policy_estimation))
             # Make the next node the root node
@@ -61,6 +62,18 @@ class AlphaAutoScheduler:
         trajectory.append((node.state, self.network_wrapper.get_no_action_aas_policy_estimation()))
         # Return the trajectory
         return trajectory
+
+    def run_parallel(self, state: OperationState, trajectories: multiprocessing.managers.ListProxy, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
+        """Run the Alpha AutoScheduler on a given state and return training data about the trajectory taken by the agent
+        and put in a multiprocessing queue.
+
+        Args:
+            state (OperationState): The initial operation state to optimize.
+            trajectory_queue (multiprocessing.Queue): The queue to put the trajectory in.
+            mode (Literal['greedy', 'stochastic'], optional): The mode to run the agent. Defaults to 'stochastic'.
+        """
+        trajectory = self.run(state, mode=mode)
+        trajectories.append(trajectory)
 
     def train(self, data: list[tuple[OperationState, AASNetworkEstimation]]):
         """Train the Alpha AutoScheduler on given history data.
@@ -90,3 +103,11 @@ class AlphaAutoScheduler:
         network = AASNetwork()
         network.load(path)
         return AlphaAutoScheduler(reward_func, network=network)
+
+    def copy(self, path: str) -> 'AlphaAutoScheduler':
+        """Copy the Alpha AutoScheduler.
+
+        Returns:
+            AlphaAutoScheduler: The copied Alpha AutoScheduler.
+        """
+        return AlphaAutoScheduler.load_from_file(path, self.reward_func)

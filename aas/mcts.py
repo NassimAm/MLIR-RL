@@ -105,7 +105,7 @@ class MCTS:
             child = parent
             parent = parent.parent
 
-    def run(self, root: Node, n_iterations: int, mode: Literal['greedy', 'stochastic'] = 'stoachastic'):
+    def run(self, root: Node, n_iterations: int, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Perform the MCTS search for a given number of iterations and convert
          action probabilities to AASNetwork policy estimation.
 

@@ -6,6 +6,7 @@ from mlir.runtime import get_ranked_memref_descriptor
 from mlir.passmanager import PassManager
 from typing import Union, Optional
 import multiprocessing
+import multiprocessing.managers
 from aas import config as cfg
 from aas.state import OperationState
 from aas.transforms import apply_transformation_with_timeout
@@ -100,14 +101,14 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
     return delta_arg[0], assertion
 
 
-def evaluate_code_with_bindings_wrapper(code: str, function_name: str, exec_times, assertions):
+def evaluate_code_with_bindings_wrapper(code: str, function_name: str, exec_times: multiprocessing.managers.ListProxy, assertions: multiprocessing.managers.ListProxy):
     """Wrapper function for evaluate_code_with_bindings to be used in multiprocessing.
 
     Args:
         code (str): The MLIR code to run.
         function_name (str): The name of the function to run.
-        exec_times (list): A list to store the execution times.
-        assertions (list): A list to store the assertion results
+        exec_times (multiprocessing.managers.ListProxy): A list to store the execution times.
+        assertions (multiprocessing.managers.ListProxy): A list to store the assertion results
     """
     exec_time, assertion = evaluate_code_with_bindings(code, function_name)
     exec_times.append(exec_time)
@@ -173,14 +174,14 @@ def evaluate_code_with_cmd(code: str, tmp_file_path: str):
         return None, False
 
 
-def evaluate_code_with_cmd_wrapper(code: str, tmp_file_path: str, exec_times, assertions):
+def evaluate_code_with_cmd_wrapper(code: str, tmp_file_path: str, exec_times: multiprocessing.managers.ListProxy, assertions: multiprocessing.managers.ListProxy):
     """Wrapper function for evaluate_code_with_cmd to be used in multiprocessing.
 
     Args:
         code (str): The MLIR code to run.
         tmp_file_path (str): The temporary file path to write the MLIR code.
-        exec_times (list): A list to store the execution times.
-        assertions (list): A list to store the assertion results
+        exec_times (multiprocessing.managers.ListProxy): A list to store the execution times.
+        assertions (multiprocessing.managers.ListProxy): A list to store the assertion results
     """
     exec_time, assertion = evaluate_code_with_cmd(code, tmp_file_path)
     exec_times.append(exec_time)

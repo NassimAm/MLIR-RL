@@ -1,6 +1,6 @@
 {
     "nb_iterations": 1000,
-    "data_queue_max_length": 1024,
+    "data_queue_max_length": 8192,
     "epochs": 4,
     "batch_size": 32,
     "nb_train_eps": 40,

@@ -13,6 +13,7 @@ from tqdm import tqdm
 from collections import deque
 import math
 from utils.log import print_info, print_alert, print_success
+import neptune
 
 
 class AASOpEnv:
@@ -201,7 +202,7 @@ class AASOpEnv:
         # best_speedup = max(2.0, bench_features.best_speedup[state.operation_tag])
         # return max(-1.0, min(1.0, math.log2(speedup / best_speedup)))
 
-    def compare(self, agent1: AlphaAutoScheduler, agent2: AlphaAutoScheduler):
+    def compare(self, agent1: AlphaAutoScheduler, agent2: AlphaAutoScheduler, neptune_logs: Optional[neptune.Run] = None):
         """Compare two agents on a set of benchmarks.
 
         Args:
@@ -237,6 +238,8 @@ class AASOpEnv:
             speedup1 = root_exec_time / exec_time1 if exec_time1 is not None and assertion1 else 1.0
             speedup2 = root_exec_time / exec_time2 if exec_time2 is not None and assertion2 else 1.0
             print_info(f"Speedup1: {speedup1}, Speedup2: {speedup2}")
+            if neptune_logs is not None:
+                neptune_logs['eval/final_speedup'].append(max(speedup1, speedup2))
             # Calculate score based on ratio between speedups (positive score = keep new agent, negative score = keep old agent)
             score += speedup1 / speedup2 if speedup1 >= speedup2 else -speedup2 / speedup1
         # Return the score
@@ -272,19 +275,20 @@ class AASTrainer:
         # Initialize data queue
         self.data = deque(maxlen=cfg.data_queue_max_length)
 
-    def train(self):
+    def train(self, neptune_logs: Optional[neptune.Run] = None):
         """Train the agent to optimize benchmarks."""
         # Initialize the environment
         state = self.env.reset()
         # Loop trough iterations
         for _ in tqdm(range(cfg.nb_iterations), desc="Main Loop"):
+            # ======================== Gather training data ========================
             # Save data gathered per iteration
             trajectories: list[list[tuple[OperationState, AASNetworkPolicyEstimation]]] = []
-            # Run train episodes
+            # Get training states
             print_info("Started MCTS search ...")
-            for _ in tqdm(range(cfg.nb_train_eps), desc="MCTS Search"):
+            for _ in tqdm(range(cfg.nb_train_eps), desc="MCTS search"):
                 # Run the agent on the current state
-                trajectory = self.agent.run(state)
+                trajectory = self.agent.run(state, mode='stochastic')
                 # Save the trajectory
                 trajectories.append(trajectory)
                 # Take a step in the environment
@@ -292,7 +296,8 @@ class AASTrainer:
             print_info("Number of trajectories:", len(trajectories))
             print_info("Total number of data points:", sum(len(trajectory) for trajectory in trajectories))
             print_info("MCTS search ended ...")
-            # Evaluate trajectories
+
+            # ======================== Execute trajectories ========================
             print_info("Started execution ...")
             speedups = []
             for j in tqdm(range(len(trajectories)), desc="Trajectory execution"):
@@ -310,18 +315,24 @@ class AASTrainer:
                             policy=trajectory_policy,
                             value=value
                         )))
+            if neptune_logs is not None:
+                neptune_logs['train/final_speedup'].extend(speedups)
             print_info("Average speedup:", sum(speedups) / len(speedups))
             print_info("Max speedup:", max(speedups))
             print_info("Execution ended ...")
+
+            # ======================== Train the agent ========================
             # Load the previous agent
             self.prev_agent = AlphaAutoScheduler.load_from_file(self.save_file_path, self.env.get_reward)
             # Train the current agent
             print_info("Started training ...")
             self.agent.train(list(self.data))
             print_info("Training ended ...")
+
+            # ======================= Evaluate the agent ======================
             # Compare between the current agent and the previous one
             print_info("Started comparison ...")
-            score = self.env.compare(self.agent, self.prev_agent)
+            score = self.env.compare(self.agent, self.prev_agent, neptune_logs=neptune_logs)
             print_info("Score:", score)
             # If the agent did not improve, load the previous agent
             if score < 0:
@@ -331,6 +342,8 @@ class AASTrainer:
             else:
                 print_success("Agent improved, keeping the current agent ...")
             print_info("Comparison ended ...")
+
+            # ====================== Save the best agent =======================
             # Save the best agent so far
             self.agent.save(self.save_file_path)
 
