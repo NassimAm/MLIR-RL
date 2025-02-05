@@ -132,36 +132,6 @@ class AASOpEnv:
         # Get benchmark data
         bench_data = self.benchmarks_data[self.bench_index]
 
-        # # Run the agent
-        # optimized_state, reward, optimized_exec_time, assertion, optimized_code = agent.run(bench_data, state)
-        # # Print infos and update reward
-        # if optimized_exec_time is None:
-        #     if optimized_code:
-        #         print_error(f"EXECUTION ERROR: ({optimized_state.bench_name} {optimized_state.operation_tag})")
-        #         print_error("ACTIONS:", optimized_state.transformation_history)
-        #     else:
-        #         print_error(f"TRANSFORMATION ERROR: ({optimized_state.bench_name} {optimized_state.operation_tag})")
-        #         print_error("ACTIONS:", optimized_state.transformation_history)
-        # else:
-        #     if assertion:
-        #         # Get relative speedup
-        #         relative_speedup = bench_data.exec_time / optimized_exec_time
-        #         # Update best speedup for the current operation
-        #         if relative_speedup > bench_data.best_speedup[optimized_state.operation_tag]:
-        #             bench_data.best_speedup[optimized_state.operation_tag] = relative_speedup
-        #         # Print logs
-        #         print_success(f"SUCCESS: ({optimized_state.bench_name} {optimized_state.operation_tag})")
-        #         print_success("RELATIVE SPEEDUP:", relative_speedup)
-        #         print_success("ABSOLUTE SPEEDUP:", bench_data.root_exec_time / optimized_exec_time)
-        #         print_success("OLD EXECUTION TIME:", bench_data.exec_time)
-        #         print_success("NEW EXECUTION TIME:", optimized_exec_time)
-        #         print_success("BEST SPEEDUP:", bench_data.best_speedup[optimized_state.operation_tag])
-        #         print_success("REWARD:", reward)
-        #         print_success("ACTIONS:", optimized_state.transformation_history)
-        #     else:
-        #         print_error(f"ASSERTION FAILED: ({optimized_state.bench_name} {optimized_state.operation_tag})")
-        #         print_error("ACTIONS:", optimized_state.transformation_history)
-
         # Indicates that the benchmark optimization is over or not
         terminated = True
         if cfg.optimization_mode == "all":
@@ -298,11 +268,12 @@ class AASTrainer:
     prev_agent: Optional[AlphaAutoScheduler]
     """The previous agent to compare with the current one."""
 
-    def __init__(self, env_type: Literal["op"] = "op"):
+    def __init__(self, env_type: Literal["op"] = "op", save_file_path: Optional[str] = None):
         """Initialize the trainer.
 
         Args:
             env (AASOpEnv): The environment to train the agent on.
+            save_file_path (Optional[str]): The path to save the agent to. Defaults to None.
         """
         # Initialize the environment
         if env_type == "op":
@@ -311,7 +282,10 @@ class AASTrainer:
         else:
             raise ValueError(f"Invalid environment type ({env_type}). Please choose 'op' for operation-wise optimization.")
         # Initialize agents
-        self.save_file_path = os.path.join("models", "aas_agent.pt")
+        if save_file_path is None:
+            self.save_file_path = os.path.join("models", "aas_agent.pt")
+        else:
+            self.save_file_path = save_file_path
         self.agent = AlphaAutoScheduler(self.train_env.get_reward)
         self.agent.save(self.save_file_path)
         self.prev_agent = None
@@ -401,6 +375,7 @@ class AASTrainer:
                 if neptune_logs is not None:
                     neptune_logs['eval/comp/final_speedup'].extend(speedups2)
             else:
+                # Keep the current agent
                 print_success("Agent improved, keeping the current agent ...")
                 if neptune_logs is not None:
                     neptune_logs['eval/comp/final_speedup'].extend(speedups1)
@@ -410,8 +385,8 @@ class AASTrainer:
             print_info("Started evaluation ...")
             greedy_speedups = self.eval_env.eval(self.agent, mode='greedy')
             stochastic_speedups = self.eval_env.eval(self.agent, mode='stochastic')
-            print_info("Greedy speedups average:", sum(greedy_speedups) / len(greedy_speedups) if greedy_speedups else 0.0)
-            print_info("Stochastic speedups average:", sum(stochastic_speedups) / len(stochastic_speedups) if stochastic_speedups else 0.0)
+            print_info("Greedy speedups average:", sum(greedy_speedups) / len(greedy_speedups) if len(greedy_speedups) > 0 else 0.0)
+            print_info("Stochastic speedups average:", sum(stochastic_speedups) / len(stochastic_speedups) if len(stochastic_speedups) > 0 else 0.0)
             if neptune_logs is not None:
                 neptune_logs['eval/greedy/final_speedup'].extend(greedy_speedups)
                 neptune_logs['eval/stochastic/final_speedup'].extend(stochastic_speedups)
@@ -427,4 +402,4 @@ class AASTrainer:
         Returns:
             AlphaAutoScheduler: The best agent so far.
         """
-        return AlphaAutoScheduler.load_from_file(self.save_file_path, self.env.get_reward)
+        return AlphaAutoScheduler.load_from_file(self.save_file_path, self.train_env.get_reward)

@@ -23,5 +23,7 @@ conda activate $CONDA_ENV_NAME
 
 # Set config file path
 export AAS_CONFIG_FILE_PATH=config/aas_example.json
+# Set save file path for agent's network
+export AAS_SAVE_FILE_PATH=models/aas_agent.pt
 # Execute the code
 python /scratch/$NYU_NET_ID/MLIR-RL/train_aas.py

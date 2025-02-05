@@ -124,11 +124,3 @@ class AlphaAutoScheduler:
         network = AASNetwork()
         network.load(path)
         return AlphaAutoScheduler(reward_func, network=network)
-
-    def copy(self, path: str) -> 'AlphaAutoScheduler':
-        """Copy the Alpha AutoScheduler.
-
-        Returns:
-            AlphaAutoScheduler: The copied Alpha AutoScheduler.
-        """
-        return AlphaAutoScheduler.load_from_file(path, self.reward_func)

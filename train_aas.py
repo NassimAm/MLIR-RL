@@ -10,9 +10,10 @@ from utils.neptune_utils import init_neptune
 import os
 
 # Set trainer
-trainer = AASTrainer()
+trainer = AASTrainer(env_type='op', save_file_path=os.getenv('AAS_SAVE_FILE_PATH', None))
 print_info('Env build ...')
-print_info(f'temporary file path = {trainer.env.tmp_file_path}')
+print_info(f'Temporary env file at {trainer.env.tmp_file_path}')
+print_info(f"Agent's network saved at {trainer.save_file_path}")
 # Print configuration
 print_info('Configuration:')
 print_info(cfg)
