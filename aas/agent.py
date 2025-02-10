@@ -6,6 +6,9 @@ from aas.mcts import MCTS
 from aas.state import OperationState
 from typing import Optional, Callable, Literal
 import multiprocessing.managers
+from copy import deepcopy
+import numpy as np
+import torch
 
 
 class AlphaAutoSchedulerStats:
@@ -63,17 +66,23 @@ class AlphaAutoScheduler:
         # Return the trajectory
         return trajectory
 
-    def run_parallel(self, state: OperationState, trajectories: multiprocessing.managers.ListProxy, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
+    def run_parallel(self, state: OperationState, process_id: int, trajectories_list: multiprocessing.managers.ListProxy, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Run the Alpha AutoScheduler on a given state and return training data about the trajectory taken by the agent
         and put in a multiprocessing queue.
 
         Args:
             state (OperationState): The initial operation state to optimize.
-            trajectory_queue (multiprocessing.Queue): The queue to put the trajectory in.
+            process_id (int): The process id of the current process.
+            trajectories_list (multiprocessing.managers.ListProxy): The list to put the trajectory in.
             mode (Literal['greedy', 'stochastic'], optional): The mode to run the agent. Defaults to 'stochastic'.
         """
-        trajectory = self.run(state, mode=mode)
-        trajectories.append(trajectory)
+        # Reseed numpy random generator
+        np.random.seed()
+        # Reseed torch random generator
+        torch.manual_seed(np.random.randint(0, 2**32 - 1))
+        # Run agent
+        trajectory = self.run(deepcopy(state), mode=mode)
+        trajectories_list.append((process_id, trajectory))
 
     def train(self, data: list[tuple[OperationState, AASNetworkEstimation]]):
         """Train the Alpha AutoScheduler on given history data.

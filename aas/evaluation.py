@@ -138,10 +138,12 @@ def evaluate_code_with_bindings_and_timeout(code: str, function_name: str, timeo
         # The function is still running, terminate the process
         process.terminate()
         process.join()
+        process.close()
 
         return None, False
     else:
         # The function completed within the timeout
+        process.close()
         return exec_times[0], assertions[0]
 
 
@@ -211,10 +213,12 @@ def evaluate_code_with_cmd_and_timeout(code: str, tmp_file_path: str, timeout: O
         # The function is still running, terminate the process
         process.terminate()
         process.join()
+        process.close()
 
         return None, False
     else:
         # The function completed within the timeout
+        process.close()
         return exec_times[0], assertions[0]
 
 
@@ -257,16 +261,22 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
         else:
             # If code is None or empty, return execution error
             return None, False, code
+    # Check last transformation code
+    if not code:
+        return None, False, code
 
     # Check execution database for the execution time of the given state
     if cfg.exec_db_path:
-        with open(cfg.exec_db_path, "r") as f:
-            exec_db = json.load(f)
+        try:
+            with open(cfg.exec_db_path, "r") as f:
+                exec_db = json.load(f)
             bench_db = exec_db.get(state.bench_features.bench_name)
             if bench_db:
                 exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
                 if exec_time:
                     return exec_time, True, code
+        except Exception:
+            pass
 
     # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
@@ -275,15 +285,18 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
         exec_time, assertion = evaluate_code_with_cmd_and_timeout(code, tmp_file_path, timeout=timeout)
     # Store the execution time in the execution database
     if (exec_time is not None) and assertion and cfg.exec_db_path:
-        with open(cfg.exec_db_path, "r") as f:
-            exec_db = json.load(f)
-        bench_db = exec_db.get(state.bench_features.bench_name)
-        if not bench_db:
-            bench_db = {}
-            exec_db[state.bench_features.bench_name] = bench_db
-        exec_db[state.bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
-        with open(cfg.exec_db_path, "w") as f:
-            json.dump(exec_db, f, indent=2)
+        try:
+            with open(cfg.exec_db_path, "r") as f:
+                exec_db = json.load(f)
+            bench_db = exec_db.get(state.bench_features.bench_name)
+            if not bench_db:
+                bench_db = {}
+                exec_db[state.bench_features.bench_name] = bench_db
+            exec_db[state.bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
+            with open(cfg.exec_db_path, "w") as f:
+                json.dump(exec_db, f, indent=2)
+        except Exception:
+            pass
 
     # Return the execution time and assertion result and transformed code
     return exec_time, assertion, code
@@ -327,17 +340,22 @@ def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_
                 return None, False, code
         # Update the full schedule
         full_schedule.insert(0, state.transformation_history)
+    # Check last transformation code
+    if not code:
+        return None, False, code
 
     # Check execution database for the execution time of the given state
     if cfg.exec_db_path:
-        with open(cfg.exec_db_path, "r") as f:
-            exec_db = json.load(f)
+        try:
+            with open(cfg.exec_db_path, "r") as f:
+                exec_db = json.load(f)
             bench_db = exec_db.get(bench_features.bench_name)
             if bench_db:
                 exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
                 if exec_time:
                     return exec_time, True, code
-
+        except Exception:
+            pass
     # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
         exec_time, assertion = evaluate_code_with_bindings_and_timeout(code, bench_features.bench_name, timeout=timeout)
@@ -345,15 +363,18 @@ def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_
         exec_time, assertion = evaluate_code_with_cmd_and_timeout(code, tmp_file_path, timeout=timeout)
     # Store the execution time in the execution database
     if (exec_time is not None) and assertion and cfg.exec_db_path:
-        with open(cfg.exec_db_path, "r") as f:
-            exec_db = json.load(f)
-        bench_db = exec_db.get(bench_features.bench_name)
-        if not bench_db:
-            bench_db = {}
-            exec_db[bench_features.bench_name] = bench_db
-        exec_db[bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
-        with open(cfg.exec_db_path, "w") as f:
-            json.dump(exec_db, f, indent=2)
+        try:
+            with open(cfg.exec_db_path, "r") as f:
+                exec_db = json.load(f)
+            bench_db = exec_db.get(bench_features.bench_name)
+            if not bench_db:
+                bench_db = {}
+                exec_db[bench_features.bench_name] = bench_db
+            exec_db[bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
+            with open(cfg.exec_db_path, "w") as f:
+                json.dump(exec_db, f, indent=2)
+        except Exception:
+            pass
 
     # Return the execution time and assertion result and transformed code
     return exec_time, assertion, code
@@ -376,12 +397,15 @@ def get_cached_exec_time(state: OperationState):
         else:
             full_schedule.append([])
     # Check execution database for the execution time of the given state
-    if cfg.exec_db_path:
-        with open(cfg.exec_db_path, "r") as f:
-            exec_db = json.load(f)
+    try:
+        if cfg.exec_db_path:
+            with open(cfg.exec_db_path, "r") as f:
+                exec_db = json.load(f)
             bench_db = exec_db.get(state.bench_features.bench_name)
             if bench_db:
                 exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
                 if exec_time:
                     return exec_time
+    except Exception:
+        pass
     return None

@@ -27,7 +27,7 @@
     "optimization_mode": "all",
     "benchmarks_folder_path": "data/lqcd/control",
     "json_file": "data/lqcd/control/execution_times.json",
-    "exec_db_path": "",
+    "exec_db_path": "data/lqcd/control/exec_db.json",
     "tags": ["lqcd", "control", "VEAS"],
     "logging": false
 }

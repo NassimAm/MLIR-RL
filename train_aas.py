@@ -12,14 +12,15 @@ import os
 # Set trainer
 trainer = AASTrainer(env_type='op', save_file_path=os.getenv('AAS_SAVE_FILE_PATH', None))
 print_info('Env build ...')
-print_info(f'Temporary env file at {trainer.env.tmp_file_path}')
+print_info(f'Temporary training env file at {trainer.train_env.tmp_file_path}')
+print_info(f'Temporary evaluation env file at {trainer.eval_env.tmp_file_path}')
 print_info(f"Agent's network saved at {trainer.save_file_path}")
 # Print configuration
 print_info('Configuration:')
 print_info(cfg)
 
 # Set neptune logs if enabled
-neptune_logs = init_neptune(['aas'] + cfg.tags, cfg_path=os.getenv('AAS_CONFIG_FILE_PATH')) if cfg.logging else None
+neptune_logs = init_neptune(['aas'] + cfg.tags, cfg_path=os.getenv('AAS_CONFIG_FILE_PATH'), mode='sync') if cfg.logging else None
 
 # Start training
 print_info('Start training ... ')

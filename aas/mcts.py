@@ -65,12 +65,12 @@ class MCTS:
         # Evaluate the node
         # TODO: It would be useful if v is always an underestimation of the real speedup
         real_exec_time = get_cached_exec_time(node.state)
+        aas_estimation = self.aas_network_wrapper.eval_node(node)
         if real_exec_time is not None:
             # Use the real speedup if available to get the value
             node_value = self.reward_func(node.state, real_exec_time)
         else:
             # Otherwise, use the AAS network to estimate the value
-            aas_estimation = self.aas_network_wrapper.eval_node(node)
             node_value = aas_estimation.get_value()
         # Update the node with its value
         node.update_leaf(node_value)
