@@ -271,12 +271,12 @@ class AASOpEnv:
             float: The average speedup of the agent on the benchmarks.
         """
         # Run specified number of full benchmark episodes
-        state = self.reset()
-        terminated = False
         speedups = []
         # TODO: make the number of episodes configurable
         for _ in range(1):
             optimized_states = []
+            state = self.reset()
+            terminated = False
             bench_features = state.bench_features
             while not terminated:
                 # Run the agent on the current state
@@ -408,7 +408,7 @@ class AASTrainer:
 
             # ======================== Train the agent =============================
             # Load the previous agent
-            self.prev_agent = AlphaAutoScheduler.load_from_file(self.save_file_path, self.train_env.get_reward)
+            self.prev_agent = self.agent.copy()
             # Train the current agent
             print_info("Started training ...")
             train_stats = self.agent.train(list(self.data))
@@ -439,17 +439,17 @@ class AASTrainer:
             print_info("Comparison ended ...")
 
             # ================ Evaluate the agent without MCTS =====================
-            # print_info("Started evaluation ...")
-            # greedy_speedups = self.eval_env.eval(self.agent, mode='greedy')
-            # stochastic_speedups = self.eval_env.eval(self.agent, mode='stochastic')
-            # print_info("Greedy speedups average:", sum(greedy_speedups) / len(greedy_speedups) if len(greedy_speedups) > 0 else 0.0)
-            # print_info("Stochastic speedups average:", sum(stochastic_speedups) / len(stochastic_speedups) if len(stochastic_speedups) > 0 else 0.0)
-            # if neptune_logs is not None:
-            #     if len(greedy_speedups) > 0:
-            #         neptune_logs['eval/greedy/final_speedup'].extend(greedy_speedups, wait=True)
-            #     if len(stochastic_speedups) > 0:
-            #         neptune_logs['eval/stochastic/final_speedup'].extend(stochastic_speedups, wait=True)
-            # print_info("Evaluation ended ...")
+            print_info("Started evaluation ...")
+            greedy_speedups = self.eval_env.eval(self.agent, mode='greedy')
+            print_info("Greedy speedups average:", sum(greedy_speedups) / len(greedy_speedups) if len(greedy_speedups) > 0 else 0.0)
+            stochastic_speedups = self.eval_env.eval(self.agent, mode='stochastic')
+            print_info("Stochastic speedups average:", sum(stochastic_speedups) / len(stochastic_speedups) if len(stochastic_speedups) > 0 else 0.0)
+            if neptune_logs is not None:
+                if len(greedy_speedups) > 0:
+                    neptune_logs['eval/greedy/final_speedup'].extend(greedy_speedups, wait=True)
+                if len(stochastic_speedups) > 0:
+                    neptune_logs['eval/stochastic/final_speedup'].extend(stochastic_speedups, wait=True)
+            print_info("Evaluation ended ...")
 
             # ====================== Save the best agent ===========================
             # Save the best agent so far

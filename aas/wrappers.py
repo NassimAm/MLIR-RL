@@ -6,6 +6,7 @@ from aas.state import OperationState
 import torch
 from utils.torch_utils import sample_from_dist
 from typing import Optional, Literal
+torch.set_printoptions(threshold=10_000)
 
 
 class AASNetworkPolicyEstimation:
@@ -26,7 +27,7 @@ class AASNetworkPolicyEstimation:
         self.select_probs = select_probs
         self.parallel_params_probs = parallel_params_probs
 
-    def get_max_hierarchical_prob_action(self, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
+    def get_action_from_hierarchical_probs(self, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Get the action selected in a hierarchical manner given the estimation.
 
         Args:
@@ -173,8 +174,7 @@ class AASNetworkWrapper:
             input_arr.append(state.to_tensor())
             # Get masks
             policy_mask_arr.append(0.0 if target.policy.is_no_action_estimation() else 1.0)
-            latest_action = state.transformation_history[-1] if len(state.transformation_history) > 0 else None
-            parallel_params_mask_arr.append(self.get_action_mask(state, latest_action))
+            parallel_params_mask_arr.append(self.get_action_mask(state, target.policy))
             # Get target tensors
             select_probs_target_arr.append(target.policy.select_probs)
             parallel_params_probs_target_arr.append(target.policy.parallel_params_probs)
@@ -235,24 +235,22 @@ class AASNetworkWrapper:
                     self.stats.parallel_params_loss[i].append(ppls[i].item())
                 self.stats.value_loss.append(vl.item())
 
-    def get_action_mask(self, state: OperationState, action: Optional[Action]):
-        """Get the mask for the action.
+    def get_action_mask(self, state: OperationState, policy: AASNetworkPolicyEstimation):
+        """Get the mask for target policy in given state.
 
         Args:
-            state (OperationState): The current state.
-            action (Optional[Action]): The action to get the mask for.
+            state (OperationState): The operation state
+            policy (AASNetworkPolicyEstimation): The policy estimation.
 
         Returns:
             torch.Tensor: The mask for parallel tile sizes selection.
         """
         # Set a mask for loop tile sizes selection
         parallel_params_mask = torch.zeros(cfg.max_num_loops)
-        # If no action is given, return masks
-        if action is None:
+        # If parallelization is not selected, return mask with zeros
+        if policy.select_probs[Parallelization.ID] == 0:
             return parallel_params_mask
-        # Otherwise, set masks for the action
-        if isinstance(action, Parallelization):
-            # Mask loops which tile sizes are not needed
+        else:  # Otherwise, mask loops which tile sizes are not needed
             nb_loops = len(state.operation_features.nested_loops)
             for i in range(cfg.max_num_loops):
                 parallel_params_mask[i] = 1 if i < nb_loops else 0
@@ -317,7 +315,10 @@ class AASNetworkWrapper:
             # Set model to evaluation mode
             self.model.eval()
             # Make prediction
-            select_probs, parallel_params_probs, value = self.model(node.state.to_tensor())
+            select_probs, parallel_params_probs, value = self.model(node.state.to_tensor().unsqueeze(0))
+            select_probs = select_probs.squeeze(0)
+            parallel_params_probs = parallel_params_probs.squeeze(0)
+            value = value.squeeze(0)
             # Set model back to training mode
             self.model.train()
         # Create the AASNetwork estimation
@@ -345,9 +346,59 @@ class AASNetworkWrapper:
             # Set model to evaluation mode
             self.model.eval()
             # Make prediction
-            select_probs, parallel_params_probs, value = self.model(state.to_tensor())
+            select_probs, parallel_params_probs, value = self.model(state.to_tensor().unsqueeze(0))
+            select_probs = select_probs.squeeze(0)
+            parallel_params_probs = parallel_params_probs.squeeze(0)
+            value = value.squeeze(0)
             # Set model back to training mode
             self.model.train()
+        # Apply masks
+        # If state is terminal, return no action AAS policy estimation and state value
+        if state.is_terminal():
+            return AASNetworkEstimation(
+                policy=self.get_no_action_aas_policy_estimation(),
+                value=value
+            )
+        transformation_names = [action.name for action in state.transformation_history]
+        op_features = state.operation_features
+        parallelization_applied = Parallelization.DEFAULT_NAME in transformation_names
+        # If parallelization is already applied don't apply it again
+        if parallelization_applied:
+            parallel_action = next(action for action in state.transformation_history if isinstance(action, Parallelization))
+            op_features = parallel_action.update_op_features(state.operation_features)
+            select_probs[Parallelization.ID] = 0.0
+        else:
+            select_probs[NoTransformation.ID] = 0.0
+        # If vectorization is not possible, don't apply it
+        if not Vectorization.is_possible(op_features):
+            select_probs[Vectorization.ID] = 0.0
+        # If parallelization is already applied, mask all parallelization parameters
+        if parallelization_applied:
+            parallel_params_probs[:, :] = 0.0
+            parallel_params_probs[:, 0] = 1.0
+        else:  # Otherwise, mask parallelization parameters that don't divide the loop size
+            for i, loop in enumerate(op_features.nested_loops):
+                for j in range(cfg.num_tile_sizes + 1):
+                    tile_size = Parallelization.get_tile_size(j)
+                    if tile_size > 0 and loop.upper_bound % tile_size != 0:
+                        parallel_params_probs[i, j] = 0.0
+                # Normalize the probabilities
+                loop_probs_sum = parallel_params_probs[i].sum()
+                if loop_probs_sum > 0:
+                    parallel_params_probs[i] /= loop_probs_sum
+                else:
+                    parallel_params_probs[i, 0] = 1.0
+            # Mask parallelization parameters for loops that are not present in the operation
+            nb_loops = len(op_features.nested_loops)
+            parallel_params_probs[nb_loops:, :] = 0.0
+            parallel_params_probs[nb_loops:, 0] = 1.0
+        # Normalize selection probabilities
+        select_probs_sum = select_probs.sum()
+        if select_probs_sum > 0:
+            select_probs /= select_probs_sum
+        else:
+            select_probs[NoTransformation.ID] = 1.0
+
         # Create the AASNetwork estimation
         aas_estimation = AASNetworkEstimation(
             policy=AASNetworkPolicyEstimation(
@@ -423,7 +474,7 @@ class AASNetworkWrapper:
             parallel_params_probs=parallel_params_probs
         )
         # Get the child node with the highest MCTS probability
-        max_prob_action = aas_policy_estimation.get_max_hierarchical_prob_action(mode=mode)
+        max_prob_action = aas_policy_estimation.get_action_from_hierarchical_probs(mode=mode)
         selected_node = children_dict[str(max_prob_action)]
         # Return results
         return aas_policy_estimation, selected_node

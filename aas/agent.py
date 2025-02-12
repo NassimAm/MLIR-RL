@@ -55,6 +55,11 @@ class AlphaAutoScheduler:
         while not node.is_terminal():
             # Get MCTS policy target
             target_policy_estimation, next_node = mcts.run(node, n_iterations=cfg.mcts_nb_iterations, mode=mode)
+            max_q_child = max([child for child in node.children], key=lambda x: x.q, default=None)
+            max_nb_visits_child = max([child for child in node.children], key=lambda x: x.nb_visits, default=None)
+            print(node.state.operation_tag, "Max Q", max_q_child.to_str(mcts.c_puct) if max_q_child is not None else None)
+            print(node.state.operation_tag, "Fisrt child", node.children[0].to_str(mcts.c_puct) if len(node.children) > 0 else None)
+            print(node.state.operation_tag, "Max nb visits", max_nb_visits_child.to_str(mcts.c_puct))
             # Save the current state and the target policy estimation and set value to 0 for now
             trajectory.append((node.state, target_policy_estimation))
             # Make the next node the root node
@@ -103,13 +108,18 @@ class AlphaAutoScheduler:
         Returns:
             OperationState: The final state after the agent has evaluated the state and taken actions.
         """
+        print(state.operation_tag)
         while not state.is_terminal():
             # Get the estimation of the current state
             aas_estimation = self.network_wrapper.eval(state)
+            print(aas_estimation)
             # Get the action to take
-            action = aas_estimation.policy.get_max_hierarchical_prob_action(mode=mode)
+            action = aas_estimation.policy.get_action_from_hierarchical_probs(mode=mode)
+            print(action)
             # Apply the action to the state
             state = state.next(action)
+            print("Action Value", self.network_wrapper.eval(state).get_value())
+        print("=====================================")
         # Return the final state
         return state
 
@@ -119,7 +129,7 @@ class AlphaAutoScheduler:
         Args:
             path (str): The path to save the network to.
         """
-        self.network.save(path)
+        torch.save(self.network.state_dict(), path)
 
     def load_from_file(path: str, reward_func: Callable[[OperationState, int], float]):
         """Load the Alpha AutoScheduler from a file.
@@ -131,5 +141,13 @@ class AlphaAutoScheduler:
             AlphaAutoScheduler: The loaded Alpha AutoScheduler.
         """
         network = AASNetwork()
-        network.load(path)
+        network.load_state_dict(torch.load(path, weights_only=True))
         return AlphaAutoScheduler(reward_func, network=network)
+
+    def copy(self):
+        """Copy the Alpha AutoScheduler.
+
+        Returns:
+            AlphaAutoScheduler: The copied Alpha AutoScheduler.
+        """
+        return deepcopy(self)

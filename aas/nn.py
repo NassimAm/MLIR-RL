@@ -41,12 +41,12 @@ class AASNetwork(torch.nn.Module):
         self.select_network_dim = cfg.num_transformations
         self.select_network = nn.Sequential(
             nn.Linear(512, self.select_network_dim),
-            nn.Softmax(dim=0)
+            nn.Softmax(dim=1)
         )
         self.parallel_params_network_dim = cfg.max_num_loops * (cfg.num_tile_sizes + 1)
         self.parallel_params_networks = [nn.Sequential(
             nn.Linear(512, cfg.num_tile_sizes + 1),
-            nn.Softmax(dim=0)
+            nn.Softmax(dim=1)
         ) for _ in range(cfg.max_num_loops)]
         # Define the output layers of the value network
         self.value_output_dim = 1
@@ -67,22 +67,6 @@ class AASNetwork(torch.nn.Module):
         parallel_params_probs = torch.concatenate([parallel_params_network(x).unsqueeze(1) for parallel_params_network in self.parallel_params_networks], dim=1)
         value = self.value_network(obs)
         return select_probs, parallel_params_probs, value.squeeze(-1)
-
-    def save(self, path: str):
-        """Save the AAS network.
-
-        Args:
-            path (str): The path to save the network to.
-        """
-        torch.save(self.state_dict(), path)
-
-    def load(self, path: str):
-        """Load the AAS network.
-
-        Args:
-            path (str): The path to load the network from.
-        """
-        self.load_state_dict(torch.load(path, weights_only=True))
 
 
 class CrossEntropyLoss:
