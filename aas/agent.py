@@ -55,11 +55,11 @@ class AlphaAutoScheduler:
         while not node.is_terminal():
             # Get MCTS policy target
             target_policy_estimation, next_node = mcts.run(node, n_iterations=cfg.mcts_nb_iterations, mode=mode)
-            max_q_child = max([child for child in node.children], key=lambda x: x.q, default=None)
-            max_nb_visits_child = max([child for child in node.children], key=lambda x: x.nb_visits, default=None)
-            print(node.state.operation_tag, "Max Q", max_q_child.to_str(mcts.c_puct) if max_q_child is not None else None)
-            print(node.state.operation_tag, "Fisrt child", node.children[0].to_str(mcts.c_puct) if len(node.children) > 0 else None)
-            print(node.state.operation_tag, "Max nb visits", max_nb_visits_child.to_str(mcts.c_puct))
+            # max_q_child = max([child for child in node.children], key=lambda x: x.q, default=None)
+            # max_nb_visits_child = max([child for child in node.children], key=lambda x: x.nb_visits, default=None)
+            # print(node.state.operation_tag, "Max Q", max_q_child.to_str(mcts.c_puct) if max_q_child is not None else None)
+            # print(node.state.operation_tag, "Fisrt child", node.children[0].to_str(mcts.c_puct) if len(node.children) > 0 else None)
+            # print(node.state.operation_tag, "Max nb visits", max_nb_visits_child.to_str(mcts.c_puct))
             # Save the current state and the target policy estimation and set value to 0 for now
             trajectory.append((node.state, target_policy_estimation))
             # Make the next node the root node

@@ -257,45 +257,31 @@ class AASNetworkWrapper:
         # Return masks
         return parallel_params_mask
 
-    def get_action_prob(self, node: Node, action: Action, aas_estimation: Optional[AASNetworkEstimation] = None):
+    def get_action_prob(self, node: Node, action: Action, aas_policy_estimation: Optional[AASNetworkPolicyEstimation] = None):
         """Get the probability of an action given the curent node and the AASNetwork estimation.
 
         Args:
             node (Node): The current node just before performing the action.
             action (Action): The action to calculate the probability of.
-            aas_estimation (Optional[AASNetworkEstimation]): The AASNetwork estimation. Defaults to None.
+            aas_estimation (Optional[AASNetworkPolicyEstimation]): The AASNetwork policy estimation. Defaults to None.
             If None, the network model is used to get the estimation.
 
         Returns:
             float: The probability of an action given the current node and the AASNetwork estimation.
         """
         # Get the action probabilities of the node
-        if aas_estimation is None:
-            with torch.no_grad():
-                # Set model to evaluation mode
-                self.model.eval()
-                # Make prediction
-                select_probs, parallel_params_probs, value = self.model(node.state.to_tensor())
-                # Set model back to training mode
-                self.model.train()
-                # Create the AASNetwork estimation
-                aas_estimation = AASNetworkEstimation(
-                    policy=AASNetworkPolicyEstimation(
-                        select_probs=select_probs,
-                        parallel_params_probs=parallel_params_probs
-                    ),
-                    value=value
-                )
+        if aas_policy_estimation is None:
+            aas_policy_estimation = self.eval_node_policy(node)
         # Get probability of the node
         if isinstance(action, Parallelization):
-            action_prob = aas_estimation.policy.select_probs[Parallelization.ID].item()
+            action_prob = aas_policy_estimation.select_probs[Parallelization.ID].item()
             for i, param in enumerate(action.params):
                 param_idx = Parallelization.get_param_id(param)
-                action_prob *= aas_estimation.policy.parallel_params_probs[i, param_idx].item()
+                action_prob *= aas_policy_estimation.parallel_params_probs[i, param_idx].item()
         elif isinstance(action, Vectorization):
-            action_prob = aas_estimation.policy.select_probs[Vectorization.ID].item()
+            action_prob = aas_policy_estimation.select_probs[Vectorization.ID].item()
         elif isinstance(action, NoTransformation):
-            action_prob = aas_estimation.policy.select_probs[NoTransformation.ID].item()
+            action_prob = aas_policy_estimation.select_probs[NoTransformation.ID].item()
         else:
             raise ValueError(f'Action {action} is not supported !')
 
@@ -331,6 +317,54 @@ class AASNetworkWrapper:
         )
         # Return the action probabilities
         return aas_estimation
+
+    def eval_node_policy(self, node: Node) -> AASNetworkPolicyEstimation:
+        """Evaluate the policy network on a node.
+
+        Args:
+            node (Node): The node to evaluate.
+
+        Returns:
+            AASNetworkPolicyEstimation: The AASNetwork policy estimation.
+        """
+        # Get the next action probabilities of the node
+        with torch.no_grad():
+            # Set model to evaluation mode
+            self.model.eval()
+            # Make prediction
+            select_probs, parallel_params_probs = self.model.eval_policy(node.state.to_tensor().unsqueeze(0))
+            select_probs = select_probs.squeeze(0)
+            parallel_params_probs = parallel_params_probs.squeeze(0)
+            # Set model back to training mode
+            self.model.train()
+        # Create the AASNetwork policy estimation
+        aas_policy_estimation = AASNetworkPolicyEstimation(
+            select_probs=select_probs,
+            parallel_params_probs=parallel_params_probs
+        )
+        # Return the action probabilities
+        return aas_policy_estimation
+
+    def eval_node_value(self, node: Node) -> float:
+        """Evaluate the value network on a node.
+
+        Args:
+            node (Node): The node to evaluate.
+
+        Returns:
+            float: The value of the node.
+        """
+        # Get the next action probabilities of the node
+        with torch.no_grad():
+            # Set model to evaluation mode
+            self.model.eval()
+            # Make prediction
+            value = self.model.eval_value(node.state.to_tensor().unsqueeze(0))
+            value = value.squeeze(0)
+            # Set model back to training mode
+            self.model.train()
+        # Return the value
+        return value.item()
 
     def eval(self, state: OperationState) -> AASNetworkEstimation:
         """Evaluate the policy network and value network on a node.

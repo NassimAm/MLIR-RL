@@ -68,6 +68,17 @@ class AASNetwork(torch.nn.Module):
         value = self.value_network(obs)
         return select_probs, parallel_params_probs, value.squeeze(-1)
 
+    def eval_policy(self, obs: torch.Tensor):
+        """Evaluate the policy network."""
+        x = self.backbone(obs)
+        select_probs = self.select_network(x)
+        parallel_params_probs = torch.concatenate([parallel_params_network(x).unsqueeze(1) for parallel_params_network in self.parallel_params_networks], dim=1)
+        return select_probs, parallel_params_probs
+
+    def eval_value(self, obs: torch.Tensor):
+        """Evaluate the value network."""
+        return self.value_network(obs).squeeze(-1)
+
 
 class CrossEntropyLoss:
     """Class to represent the cross-entropy loss function."""
