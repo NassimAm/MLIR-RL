@@ -5,6 +5,7 @@ from aas.state import OperationState
 from aas.evaluation import get_cached_exec_time
 import numpy as np
 from typing import Callable, Literal
+import math
 
 
 class MCTS:
@@ -31,6 +32,8 @@ class MCTS:
         self.c_puct = cfg.mcts_c_puct
         self.action_temperature = 1.0
         self.action_temperature_decay = cfg.mcts_action_temperature_decay
+        self.max_value = -math.inf
+        self.min_value = math.inf
 
     def reset(self):
         """Reset the MCTS algorithm."""
@@ -50,7 +53,7 @@ class MCTS:
             # Get dirichlet noise for the children
             noises = np.random.dirichlet([0.03] * len(node.children))
             # Calculate S scores
-            scores = np.array([child.get_s_score(self.c_puct, noise=noises[i].item()) for i, child in enumerate(node.children)])
+            scores = np.array([child.get_s_score(self.min_value, self.max_value, self.c_puct, noise=noises[i].item()) for i, child in enumerate(node.children)])
             # Get the child node with the highest S score with random tie breaking
             node_id = np.random.choice(np.flatnonzero(scores == scores.max())).item()
             node = node.children[node_id]
@@ -89,6 +92,8 @@ class MCTS:
                 node_value = self.aas_network_wrapper.eval_node_value(child)
             # Update the node with its value
             child.update_leaf(node_value)
+            self.min_value = min(self.min_value, node_value)
+            self.max_value = max(self.max_value, node_value)
 
     def backpropagate(self, node: Node):
         """Backpropagate the speedup value up the MCTS tree.
@@ -119,6 +124,9 @@ class MCTS:
             AASNetworkPolicyEstimation: The AASNetwork policy estimation.
             Node: The child node with the highest MCTS probability. The root is returned if no children.
         """
+        # Update min and max values
+        self.min_value = min(self.min_value, root.q)
+        self.max_value = max(self.max_value, root.q)
         # Run the MCTS search for a given number of iterations
         for _ in range(n_iterations):
             node = self.select(root)

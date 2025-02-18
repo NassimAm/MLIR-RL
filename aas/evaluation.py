@@ -71,7 +71,7 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
     with open(full_function_name, "r") as f:
         original_code = f.read()
 
-    np_file = np.load(full_function_name + ".npz")
+    np_file: np.lib.npyio.NpzFile = np.load(full_function_name + ".npz")
     expected: np.ndarray = np.load(full_function_name + ".npy")
 
     args_names: list[str] = sorted(
@@ -92,12 +92,14 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
         execution_engine.invoke("main", *args)
         execution_engine.invoke("main", *args)
     except Exception as e:
+        np_file.close()
         return None, e
     actual = args_map[args_names[-1]]
     if expected.dtype == np.complex128:
         actual = actual.view(np.complex128).squeeze(len(actual.shape) - 1)
     assertion = np.allclose(actual, expected)
 
+    np_file.close()
     return delta_arg[0], assertion
 
 

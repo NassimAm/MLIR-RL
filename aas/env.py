@@ -2,7 +2,7 @@ from aas import config as cfg
 from aas.observation.benchmark import BenchmarkFeatures, extract_bench_features_from_file, extract_bench_features_from_code
 from aas.state import OperationState
 from aas.agent import AlphaAutoScheduler
-from aas.wrappers import AASNetworkPolicyEstimation, AASNetworkEstimation
+from aas.wrappers import AASNetworkEstimation
 from aas.evaluation import evaluate_code_with_timeout, evaluate_benchmark_code_with_timeout
 from typing import Optional, Literal
 import random
@@ -16,6 +16,7 @@ from utils.log import print_info, print_alert, print_success, print_error
 import neptune
 import torch
 import multiprocessing
+import time
 
 
 class AASOpEnv:
@@ -169,10 +170,8 @@ class AASOpEnv:
             float: The reward for the agent.
         """
         root_exec_time = state.bench_features.root_exec_time
-        speedup = root_exec_time / exec_time
-        return max(-3.0, min(3.0, math.log2(speedup) / 2 - 1.0))
-        # best_speedup = max(2.0, bench_features.best_speedup[state.operation_tag])
-        # return max(-1.0, min(1.0, math.log2(speedup / best_speedup)))
+        speedup = root_exec_time / exec_time if exec_time > 0 and root_exec_time > 0 else 1.0
+        return math.log2(speedup)
 
     def compare(self, agent1: AlphaAutoScheduler, agent2: AlphaAutoScheduler):
         """Compare two agents on a set of benchmarks.
@@ -188,53 +187,39 @@ class AASOpEnv:
         """
         # Run specified number of full benchmark episodes
         score = 0
-        speedups1 = []
-        speedups2 = []
-        manager = multiprocessing.Manager()
-        processes: list[multiprocessing.Process] = []
+        speedups1: list[float] = []
+        speedups2: list[float] = []
+        ins: list[tuple[OperationState, str]] = []
         terminated_list: list[bool] = []
-        trajectories_list = manager.list()
-        cpt = 0
-        # Set number of torch threads to 1 to avoid issues with multiprocessing
-        original_num_threads = torch.get_num_threads()
-        torch.set_num_threads(1)
+        mcts_start_time = time.time()
+        # Gather states
         for _ in range(cfg.nb_eval_eps):
-            last_states1: list[OperationState] = []
-            last_states2: list[OperationState] = []
             terminated = False
             state = self.reset()
             bench_features = state.bench_features
             while not terminated:
-                # Run agent1 on the current state
-                process1 = multiprocessing.Process(target=agent1.run_parallel, args=(state, cpt, trajectories_list, 'greedy'))
-                processes.append(process1)
-                process1.start()
-                cpt += 1
-                # Run agent2 on the current state
-                process2 = multiprocessing.Process(target=agent2.run_parallel, args=(state, cpt, trajectories_list, 'greedy'))
-                processes.append(process2)
-                process2.start()
+                # Add the current state to the list of states
+                ins.append((state, 'greedy'))
                 # Take a step in the environment
                 state, terminated = self.step(state)
                 terminated_list.append(terminated)
-                cpt += 1
-        for i in tqdm(range(len(processes)), desc="Eval MCTS search"):
-            # Wait for trajectory data in queue
-            processes[i].join()
-            processes[i].close()
+        # Set number of torch threads to 1 to avoid issues with multiprocessing
+        original_num_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        with multiprocessing.Pool() as pool:
+            # Run the agent1 on the current states
+            trajectories1 = pool.map(agent1.run_parallel, ins)
+        with multiprocessing.Pool() as pool:
+            # Run the agent2 on the current states
+            trajectories2 = pool.map(agent2.run_parallel, ins)
         # Reset the number of torch threads
         torch.set_num_threads(original_num_threads)
-        # Sort trajectories
-        trajectories: list[tuple[int, tuple[OperationState, AASNetworkPolicyEstimation]]] = list(sorted(list(trajectories_list), key=lambda x: x[0]))
         # Get last states
         bench_states1 = []
         bench_states2 = []
         tmp_states1 = []
         tmp_states2 = []
-        for i in range(0, len(trajectories), 2):
-            trajectory1 = trajectories[i][1]
-            trajectory2 = trajectories[i + 1][1]
-            terminated = terminated_list[i // 2]
+        for trajectory1, trajectory2, terminated in zip(trajectories1, trajectories2, terminated_list):
             tmp_states1.append(trajectory1[-1][0])
             tmp_states2.append(trajectory2[-1][0])
             if terminated:
@@ -242,6 +227,9 @@ class AASOpEnv:
                 bench_states2.append(tmp_states2)
                 tmp_states1 = []
                 tmp_states2 = []
+        # Get MCTS search time
+        mcts_end_time = time.time()
+        print_info(f"MCTS Search ended in {mcts_end_time - mcts_start_time} s ...")
         # Execute optimized operations
         for i in tqdm(range(len(bench_states1)), desc="Evaluation execution"):
             last_states1 = bench_states1[i]
@@ -344,32 +332,27 @@ class AASTrainer:
         # Loop trough iterations
         for _ in tqdm(range(cfg.nb_iterations), desc="Main Loop"):
             # ======================== Gather training data ========================
-            # Get training states
-            manager = multiprocessing.Manager()
-            trajectories_list = manager.list()
-            processes: list[multiprocessing.Process] = []
             print_info("Started MCTS search ...")
+            mcts_start_time = time.time()
+            # Get training states
+            ins: list[tuple[OperationState]] = []
+            for _ in range(cfg.nb_train_eps):
+                # Add the current state to the training states
+                ins.append((state,))
+                # Take a step in the environment
+                state, _ = self.train_env.step(state)
             # Set number of torch threads to 1 to avoid issues with multiprocessing
             original_num_threads = torch.get_num_threads()
             torch.set_num_threads(1)
-            for j in range(cfg.nb_train_eps):
+            with multiprocessing.Pool() as pool:
                 # Run the agent on the current state
-                process = multiprocessing.Process(target=self.agent.run_parallel, args=(state, j, trajectories_list))
-                processes.append(process)
-                process.start()
-                # Take a step in the environment
-                state, _ = self.train_env.step(state)
-            for j in tqdm(range(len(processes)), desc="MCTS Search"):
-                # Wait for trajectory data in queue
-                processes[j].join()
-                processes[j].close()
-            # Save data gathered per iteration
-            trajectories: list[list[tuple[OperationState, AASNetworkPolicyEstimation]]] = [trajectory for _, trajectory in sorted(list(trajectories_list), key=lambda x: x[0])]
+                trajectories = pool.map(self.agent.run_parallel, ins)
             # Reset the number of torch threads
             torch.set_num_threads(original_num_threads)
+            mcts_end_time = time.time()
             print_info("Number of trajectories:", len(trajectories))
             print_info("Total number of data points:", sum(len(trajectory) for trajectory in trajectories))
-            print_info("MCTS search ended ...")
+            print_info(f"MCTS search ended in {mcts_end_time - mcts_start_time} s ...")
 
             # ======================== Execute trajectories ========================
             print_info("Started execution ...")

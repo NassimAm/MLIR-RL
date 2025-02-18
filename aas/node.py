@@ -85,27 +85,33 @@ class Node:
         """Increments the number of visits of the node."""
         self.nb_visits += 1
 
-    def get_s_score(self, c_puct: float = 1.0, noise: Optional[float] = None) -> float:
+    def get_s_score(self, min_value: float, max_value: float, c_puct: float = 1.0, noise: Optional[float] = None) -> float:
         """Get the s score of the node.
 
         Args:
+            min_value (float): The minimum value of the tree.
+            max_value (float): The maximum value of the tree.
             c_puct (float): The exploration parameter for the PUCT formula. Defaults to 1.0.
             noise (Optional[float]): The noise to add to the node exploration factor. Defaults to None.
 
         Returns:
             float: The s score of the node.
         """
-        # if self.parent is not None:
-        #     return (1 - random_exploration_temperature) * self.q + c_puct * self.node_exploration_factor * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
-        # else:
-        #     return (1 - random_exploration_temperature) * self.q
+        # Initialize Q value
+        q_hat = self.q
+        # Normalize Q value to [-1, 1]
+        if max_value != min_value:
+            q_hat = 2.0 * ((q_hat - min_value) / (max_value - min_value)) - 1.0
+        # Calculate S score
         if self.parent is not None:
+            # If the node is not the root node, calculate and add the PUCT formula
             p = self.node_exploration_factor
             if noise is not None:
                 p = 0.75 * p + 0.25 * noise
-            return self.q + c_puct * p * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
+            return q_hat + c_puct * p * ((math.sqrt(self.parent.nb_visits) / (1 + self.nb_visits)))
         else:
-            return self.q
+            # If the node is the root node, return the Q value
+            return q_hat
 
     def get_available_actions(self) -> list[Action]:
         """Get the available actions from this node.
@@ -160,7 +166,7 @@ class Node:
         """
         return self.state.is_terminal()
 
-    def to_str(self, c_puct: float = 1.0) -> str:
+    def to_str(self, min_value: float, max_value: float, c_puct: float = 1.0) -> str:
         """Get a string representation of the node.
 
         Args:
@@ -170,4 +176,4 @@ class Node:
         Returns:
             str: The string representation of the node.
         """
-        return f"<Node nb_visits={self.nb_visits} s={self.get_s_score(c_puct=c_puct)} q={self.q} node_p={self.node_exploration_factor} action={self.state.transformation_history[-1] if self.state.transformation_history else None}>"
+        return f"<Node nb_visits={self.nb_visits} s={self.get_s_score(min_value, max_value, c_puct=c_puct)} q={self.q} node_p={self.node_exploration_factor} action={self.state.transformation_history[-1] if self.state.transformation_history else None}>"
