@@ -31,7 +31,16 @@ class AlphaAutoScheduler:
         else:
             self.network = network
         self.network_wrapper = AASNetworkWrapper(self.network)
+        self.action_temperature = 1.0
         # self.stats = AlphaAutoSchedulerStats()
+
+    def set_temperature(self, temperature: float):
+        """Set the temperature for the MCTS action probabilities.
+
+        Args:
+            temperature (float): The temperature for the MCTS action probabilities.
+        """
+        self.action_temperature = temperature
 
     def run(self, state: OperationState, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Run the Alpha AutoScheduler on a given state and return training data about the trajectory taken by the agent.
@@ -50,6 +59,7 @@ class AlphaAutoScheduler:
         trajectory: list[tuple[OperationState, AASNetworkPolicyEstimation]] = []
         # Reset the MCTS algorithm
         mcts = MCTS(self.network_wrapper, self.reward_func)
+        mcts.set_temperature(self.action_temperature)
         # Run MCTS searches until a terminal node is reached
         while not node.is_terminal():
             # Get MCTS policy target
@@ -106,18 +116,18 @@ class AlphaAutoScheduler:
         Returns:
             OperationState: The final state after the agent has evaluated the state and taken actions.
         """
-        print(state.operation_tag)
+        # print(state.operation_tag)
         while not state.is_terminal():
             # Get the estimation of the current state
             aas_estimation = self.network_wrapper.eval(state)
-            print(aas_estimation)
+            # print(aas_estimation)
             # Get the action to take
             action = aas_estimation.policy.get_action_from_hierarchical_probs(mode=mode)
-            print(action)
+            # print(action)
             # Apply the action to the state
             state = state.next(action)
-            print("Action Value", self.network_wrapper.eval(state).get_value())
-        print("=====================================")
+        #     print("Action Value", self.network_wrapper.eval(state).get_value())
+        # print("=====================================")
         # Return the final state
         return state
 

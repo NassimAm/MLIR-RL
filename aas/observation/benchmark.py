@@ -132,7 +132,7 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
             )
             nested_loops.append(nested_loop)
             loop_args.append(arg)
-            op_iter_space_size *= nested_loop.upper_bound
+            op_iter_space_size *= nested_loop.upper_bound - nested_loop.lower_bound
 
         loads_data_str, rest = rest.split("#START_OP_COUNT")
         for loop_arg in loop_args:

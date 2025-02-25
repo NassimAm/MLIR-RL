@@ -162,7 +162,7 @@ def evaluate_code_with_cmd(code: str, tmp_file_path: str):
         Optional[float]: the execution time in seconds.
         bool: the assertion result.
     """
-    command_1 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt  -loop-invariant-code-motion -cse -canonicalize -cse -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize='bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map' -buffer-deallocation -scf-forall-to-parallel -convert-linalg-to-loops  -convert-vector-to-scf -convert-scf-to-openmp -expand-strided-metadata -finalize-memref-to-llvm -canonicalize -lower-affine -expand-strided-metadata -finalize-memref-to-llvm -convert-scf-to-cf -lower-affine -convert-arith-to-llvm -convert-openmp-to-llvm -convert-vector-to-llvm -convert-cf-to-llvm -convert-func-to-llvm -convert-math-to-llvm -reconcile-unrealized-casts"
+    command_1 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt -loop-invariant-code-motion -canonicalize -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize='bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map' -convert-vector-to-scf -convert-linalg-to-loops -buffer-deallocation-pipeline -scf-forall-to-parallel -convert-scf-to-openmp -expand-strided-metadata -finalize-memref-to-llvm -convert-scf-to-cf -lower-affine -convert-arith-to-llvm -convert-openmp-to-llvm -convert-vector-to-llvm -convert-cf-to-llvm -convert-func-to-llvm -convert-math-to-llvm -finalize-memref-to-llvm -reconcile-unrealized-casts -canonicalize -cse"
     command_2 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-cpu-runner -e main -entry-point-result=void -shared-libs={os.getenv('LLVM_BUILD_PATH')}/lib/libmlir_runner_utils.so,{os.getenv('LLVM_BUILD_PATH')}/lib/libmlir_c_runner_utils.so,{os.getenv('LLVM_BUILD_PATH')}/lib/libomp.so"
 
     os.environ["OMP_NUM_THREADS"] = "8"
@@ -242,12 +242,15 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
     # Get the code
     code = state.bench_features.code
     # Get the full schedule
-    full_schedule = []
-    for op_tag in state.bench_features.operation_tags:
-        if op_tag == state.operation_tag:
-            full_schedule.append(state.transformation_history)
-        else:
-            full_schedule.append([])
+    if cfg.optimization_mode == 'all':
+        full_schedule = []
+        for op_tag in state.bench_features.operation_tags:
+            if op_tag == state.operation_tag:
+                full_schedule.append(state.transformation_history)
+            else:
+                full_schedule.append([])
+    else:
+        full_schedule = [state.transformation_history]
     # Transform the code
     for action in state.transformation_history:
         # If code is not None or empty, apply the transformation
@@ -392,12 +395,15 @@ def get_cached_exec_time(state: OperationState):
         Optional[float]: the cached execution time in seconds.
     """
     # Get the full schedule
-    full_schedule = []
-    for op_tag in state.bench_features.operation_tags:
-        if op_tag == state.operation_tag:
-            full_schedule.append(state.transformation_history)
-        else:
-            full_schedule.append([])
+    if cfg.optimization_mode == 'all':
+        full_schedule = []
+        for op_tag in state.bench_features.operation_tags:
+            if op_tag == state.operation_tag:
+                full_schedule.append(state.transformation_history)
+            else:
+                full_schedule.append([])
+    else:
+        full_schedule = [state.transformation_history]
     # Check execution database for the execution time of the given state
     try:
         if cfg.exec_db_path:

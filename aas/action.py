@@ -197,3 +197,127 @@ class NoTransformation(Action):
     def __init__(self):
         """Initialize a new no transformation action."""
         super().__init__(NoTransformation.ID, NoTransformation.DEFAULT_NAME)
+
+
+class Img2Col(Action):
+    """Class to represent an image to column transformation as an agent action."""
+
+    DEFAULT_NAME = 'I2C'
+    """The default name of the image to column transformation"""
+    ID = 3
+    """The ID of the image to column transformation"""
+
+    def __init__(self):
+        """Initialize a new image to column action."""
+        super().__init__(Img2Col.ID, Img2Col.DEFAULT_NAME)
+
+    def is_possible(operation_features: OperationFeatures):
+        return operation_features.operation_type == 'conv_2d'
+
+
+class Tiling(ParameterizedAction):
+    """Class to represent a tiling alone transformation as an agent action."""
+
+    DEFAULT_NAME = 'T'
+    """The default name of the tiling transformation"""
+    ID = 4
+    """The ID of the tiling transformation"""
+
+    def __init__(self, params: list[int]):
+        """Initialize a new tiling action.
+
+        Args:
+            params (list[int]): The parameters of the transformation.
+        """
+        super().__init__(Tiling.ID, Tiling.DEFAULT_NAME, params)
+
+    def get_param_id(tile_size: int):
+        """Get the ID of the tile size.
+
+        Args:
+            tile_size (int): The tile size to get the ID for.
+
+        Returns:
+            int: The ID of the parameter.
+        """
+        return int(math.log2(tile_size)) + 1 if tile_size > 0 else 0
+
+    def get_tile_size(param_id: int):
+        """Get the tile size from the parameter ID.
+
+        Args:
+            param_id (int): The parameter ID to get the tile size from.
+
+        Returns:
+            int: The tile size.
+        """
+        return 2 ** (param_id - 1) if param_id > 0 else 0
+
+    def generate_tiling_combinations(candidates: list[list[int]]):
+        """Generate all possible tiling combinations from the list of candidates.
+
+        Args:
+            candidates (list[list[int]]): The list of candidates to generate tiling combinations from.
+
+        Returns:
+            list[list[int]]: The list of all possible tiling combinations.
+        """
+        if len(candidates) == 0:
+            return []
+        elif len(candidates) == 1:
+            return [[candidate] for candidate in candidates[0]]
+        else:
+            sub_candidates = Tiling.generate_tiling_combinations(candidates[1:])
+            return [[candidate] + sub_candidate for candidate in candidates[0] for sub_candidate in sub_candidates]
+
+    def get_tiling_candidates(operation_features: OperationFeatures):
+        """Get the tiling candidates for the operation features.
+
+        Args:
+            operation_features (OperationFeatures): The operation features to get the tiling candidates from.
+
+        Returns:
+            list[list[int]]: The list of tiling candidates.
+        """
+        candidates = []
+        for nested_loop in operation_features.nested_loops:
+            # If upperbound equal 1, we only have candidates of 1
+            if nested_loop.upper_bound == 1:
+                sub_candidates = [0, 1]
+            # If the data format is json and the iterator type is reduction, we don't do tiling
+            # TODO: the condition has to change because it's not related to the data format, it's related to a non thread safe tiling problem
+            # so we skip it to not let it happen for now
+            if cfg.data_format == 'json' and nested_loop.iterator_type == 'reduction':
+                sub_candidates = [0]
+            else:
+                # We take the divisors of the upperbound
+                sub_candidates = [0]
+                i = 1
+                while i <= nested_loop.upper_bound and len(sub_candidates) < cfg.num_tile_sizes:
+                    if nested_loop.upper_bound % i == 0:
+                        sub_candidates.append(i)
+                    i *= 2
+            candidates.append(sub_candidates)
+        # Fill other loops with 0 as candidate
+        for _ in range(len(operation_features.nested_loops), cfg.max_num_loops):
+            candidates.append([0])
+
+        return candidates
+
+    def update_op_features(self, operation_features: OperationFeatures):
+        """Update the operation features with the tiling.
+
+        Args:
+            operation_features (OperationFeatures): The operation features to update.
+        """
+        op_iter_space_size = 1
+        for i, nested_loop in enumerate(operation_features.nested_loops):
+            op_iter_space_size *= self.params[i] if self.params[i] != 0 else nested_loop.upper_bound
+        return OperationFeatures(
+            operation_type=operation_features.operation_type,
+            op_count=operation_features.op_count,
+            op_iter_space_size=op_iter_space_size,
+            nested_loops=operation_features.nested_loops,
+            load_data=operation_features.load_data,
+            store_data=operation_features.store_data
+        )

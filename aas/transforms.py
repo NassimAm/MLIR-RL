@@ -492,10 +492,40 @@ def apply_transformation(state: OperationState, code: str, tmp_file_path: str, a
     # elif transformation == 'img2col':
     #     new_code = transform_dialect_img2col(code, state.operation_tag, tmp_file_path)
     elif isinstance(action, Vectorization):
+        # Force no transformation on pooling operations
+        if state.operation_features.operation_type == 'pooling':
+            return code
+
         # If the operation isn't small enough for vectorization, ignore the transformation
         if not Vectorization.is_possible(operation_features):
             print_alert(f"REASON: Too large to vectorize {operation_features.op_iter_space_size} > {cfg.vect_size_limit}")
             return ''
+
+        # # For convolution, before vectorization, we need to first apply another tiling in order to decompose it to 1d convolution
+        # if (state.operation_features.operation_type == 'conv_2d'):
+        #     if ('conv_2d_nhwc_hwcf' in state.operation_features.raw_operation):
+        #         second_interchange_parameters = parameters.copy()
+        #         second_interchange_parameters[1] = 1
+        #         second_interchange_parameters[4] = 1
+        #     elif ('conv_2d_nchw_fchw' in state.operation_features.raw_operation):
+        #         second_interchange_parameters = parameters.copy()
+        #         second_interchange_parameters[2] = 1
+        #         second_interchange_parameters[5] = 1
+        #     elif ('pooling' in state.operation_features.raw_operation):
+        #         second_interchange_parameters = [0] * 6
+        #         second_interchange_parameters[2] = 1
+        #         second_interchange_parameters[4] = 1
+        #     state.transformed_code = apply_transformation_with_timeout(
+        #         state=state,
+        #         bench_features=bench_data,
+        #         code=state.transformed_code,
+        #         transformation='tiling',
+        #         parameters=second_interchange_parameters,
+        #         timeout=20,
+        #         use_vectorizer=cfg.use_vectorizer
+        #     )
+
+        #     state.transformed_code = apply_conv2d_decomposition(state.transformed_code, state.operation_tag, self.tmp_file)
 
         if use_vectorizer:
             new_code = transform_dialect_vectorise_with_vectorizer(code, state.operation_tag, tmp_file_path)

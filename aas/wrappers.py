@@ -188,7 +188,8 @@ class AASNetworkWrapper:
         value_target = torch.tensor(value_target_arr)
         # Calculate nb steps per epoch
         data_size = len(data)
-        nb_steps = data_size // cfg.batch_size + (1 if data_size % cfg.batch_size != 0 else 0)
+        # nb_steps = data_size // cfg.batch_size + (1 if data_size % cfg.batch_size != 0 else 0)
+        nb_steps = data_size // cfg.batch_size
         for _ in range(cfg.epochs):
             # Shuffle tensors
             perm = torch.randperm(len(data))

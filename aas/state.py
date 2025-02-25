@@ -175,6 +175,14 @@ class OperationState:
         # Otherwise, the state is not terminal
         return False
 
+    def is_final(self):
+        """Check if the state is final.
+
+        Returns:
+            bool: True if the state is final, False otherwise.
+        """
+        return self.is_terminal() and self.operation_tag == self.bench_features.operation_tags[0]
+
     def __repr__(self):
         return f"OperationState(bench_name={self.bench_features.bench_name}, operation_tag={self.operation_tag}, " \
                f"operation_features={self.operation_features}, step_count={self.step_count}, " \

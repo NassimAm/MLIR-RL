@@ -17,8 +17,6 @@ class MCTS:
     """The PUCT constant for the MCTS algorithm"""
     action_temperature: float
     """The temperature for the MCTS action probabilities"""
-    action_temperature_decay: float
-    """The temperature decay for the MCTS action probabilities"""
 
     def __init__(self, aas_network_wrapper: AASNetworkWrapper, reward_func: Callable[[OperationState, int], float]):
         """Initialize the MCTS algorithm.
@@ -31,13 +29,20 @@ class MCTS:
         self.reward_func = reward_func
         self.c_puct = cfg.mcts_c_puct
         self.action_temperature = 1.0
-        self.action_temperature_decay = cfg.mcts_action_temperature_decay
         self.max_value = -math.inf
         self.min_value = math.inf
 
     def reset(self):
         """Reset the MCTS algorithm."""
         self.action_temperature = 1.0
+
+    def set_temperature(self, temperature: float):
+        """Set the temperature for the MCTS action probabilities.
+
+        Args:
+            temperature (float): The temperature for the MCTS action probabilities.
+        """
+        self.action_temperature = temperature
 
     def select(self, root: Node) -> Node:
         """Select a node in the MCTS tree to explore.
@@ -134,7 +139,5 @@ class MCTS:
             self.backpropagate(node)
         # Calculate next policy estimation
         aas_policy_estimation, max_p_node = self.aas_network_wrapper.evaluate_tree(root, self.action_temperature, mode=mode)
-        # Update temperatures
-        self.action_temperature *= self.action_temperature_decay
         # Return the full AAS policy estimation
         return aas_policy_estimation, max_p_node

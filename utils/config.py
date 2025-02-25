@@ -162,11 +162,8 @@ class AASConfig(metaclass=Singleton):
     """Flag to normalize the features"""
     learning_rate: float
     """Learning rate"""
-    bse_param: float
-    """The Boltzmann squared error parameter. It controls how much close the value would be from the max value.
-    A param close to 0 means that minimizing the error would converge to the mean value, a param that goes to positive infinity means the value would converge to the max value."""
-    bse_relaxation: float
-    """The Boltzmann squared error relaxation parameter. It controls how much the error gradient would relaxed."""
+    quantile_alpha: float
+    """Quantile alpha value for the quantile loss"""
     enable_hierarchical_space: bool
     """Flag to enable hierarchical space for actions"""
     # MCTS configuration ============================================
@@ -178,8 +175,6 @@ class AASConfig(metaclass=Singleton):
     """The estimation mode for MCTS"""
     mcts_c_puct: float
     """The PUCT constant for MCTS"""
-    mcts_action_temperature_decay: float
-    """The temperature decay for MCTS action probabilities"""
     # MLIR code features configuration ==============================
     max_num_stores_loads: int
     """The maximum number of loads in the nested loops"""
@@ -227,14 +222,12 @@ class AASConfig(metaclass=Singleton):
         self.nb_eval_eps = 10
         self.normalize_features = False
         self.learning_rate = 0.001
-        self.bse_param = 1.5
-        self.bse_relaxation = 0.001
+        self.quantile_alpha = 0.5
         self.enable_hierarchical_space = True
         self.mcts_max_num_tile_combinations = -1
         self.mcts_nb_iterations = 1000
         self.mcts_estimation_mode = "VEMS"
         self.mcts_c_puct = 1.0
-        self.mcts_action_temperature_decay = 1.0
         self.max_num_stores_loads = 7
         self.max_num_loops = 7
         self.max_num_load_store_dim = 7
@@ -266,14 +259,12 @@ class AASConfig(metaclass=Singleton):
         self.nb_eval_eps = config["nb_eval_eps"]
         self.normalize_features = config["normalize_features"]
         self.learning_rate = config["learning_rate"]
-        self.bse_param = config["bse_param"]
-        self.bse_relaxation = config["bse_relaxation"]
+        self.quantile_alpha = config["quantile_alpha"]
         self.enable_hierarchical_space = config["enable_hierarchical_space"]
         self.mcts_max_num_tile_combinations = config["mcts_max_num_tile_combinations"]
         self.mcts_nb_iterations = config["mcts_nb_iterations"]
         self.mcts_estimation_mode = config["mcts_estimation_mode"]
         self.mcts_c_puct = config["mcts_c_puct"]
-        self.mcts_action_temperature_decay = config["mcts_action_temperature_decay"]
         self.max_num_stores_loads = config["max_num_stores_loads"]
         self.max_num_loops = config["max_num_loops"]
         self.max_num_load_store_dim = config["max_num_load_store_dim"]
@@ -309,14 +300,12 @@ class AASConfig(metaclass=Singleton):
             "nb_eval_eps": self.nb_eval_eps,
             "normalize_features": self.normalize_features,
             "learning_rate": self.learning_rate,
-            "bse_param": self.bse_param,
-            "bse_relaxation": self.bse_relaxation,
+            "quantile_alpha": self.quantile_alpha,
             "enable_hierarchical_space": self.enable_hierarchical_space,
             "mcts_max_num_tile_combinations": self.mcts_max_num_tile_combinations,
             "mcts_nb_iterations": self.mcts_nb_iterations,
             "mcts_estimation_mode": self.mcts_estimation_mode,
             "mcts_c_puct": self.mcts_c_puct,
-            "mcts_action_temperature_decay": self.mcts_action_temperature_decay,
             "max_num_stores_loads": self.max_num_stores_loads,
             "max_num_loops": self.max_num_loops,
             "max_num_load_store_dim": self.max_num_load_store_dim,
