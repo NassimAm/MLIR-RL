@@ -342,12 +342,12 @@ class AASTrainer:
     def train(self, neptune_logs: Optional[neptune.Run] = None):
         """Train the agent to optimize benchmarks."""
         # Initialize the environment
-        state = self.train_env.reset()
         prev_eval_speedups: Optional[list] = None
         prev_eval_bench_names: Optional[list[str]] = None
         agent_eval_changed = False
         # Get training states
         ins: list[tuple[OperationState]] = []
+        state = self.train_env.reset()
         for _ in range(cfg.nb_train_eps):
             # Add the current state to the training states
             ins.append((state,))
@@ -429,6 +429,7 @@ class AASTrainer:
             # ======================= Get training data ============================
             # Get training states
             ins.clear()
+            state = self.train_env.reset()
             for _ in range(cfg.nb_train_eps):
                 # Add the current state to the training states
                 ins.append((state,))

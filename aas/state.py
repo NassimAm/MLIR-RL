@@ -181,7 +181,7 @@ class OperationState:
         Returns:
             bool: True if the state is final, False otherwise.
         """
-        return self.is_terminal() and self.operation_tag == self.bench_features.operation_tags[0]
+        return self.is_terminal() and (self.operation_tag == self.bench_features.operation_tags[0] if cfg.optimization_mode == 'all' else self.operation_tag == self.bench_features.operation_tags[-1])
 
     def __repr__(self):
         return f"OperationState(bench_name={self.bench_features.bench_name}, operation_tag={self.operation_tag}, " \
