@@ -17,7 +17,7 @@ import math
 from utils.log import print_info, print_alert, print_success, print_error
 import neptune
 import torch
-import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 import time
 import psutil
 
@@ -76,7 +76,7 @@ class AASOpEnv:
                 'linalg.add',
             ]
             json_data = {op: details for op, details in json_data.items() if any([s in op for s in operation_filter])}
-            json_data = [(details['operation'], details) for _, details in json_data.items()]
+            json_data = [(op, details) for op, details in json_data.items()]
 
             # Get the AST of the MLIR code and give a tag to each linalg operation
             # The last operation represents the operations that we want to optimize (the first operations are just linalg.fills)
@@ -85,7 +85,7 @@ class AASOpEnv:
                 code = json_data[i][1]["transform_wrapped_operation"]
                 exec_time = json_data[i][1]["execution_time"]
                 # Build benchmark features
-                bench_name = f"bench_{i}"
+                bench_name = json_data[i][0]
                 benchmark_data = extract_bench_features_from_code(bench_name, code, exec_time)
                 # Apply Img2Col transformation to conv_2d operations
                 for op_tag, op_features in benchmark_data.operations.items():
@@ -218,12 +218,12 @@ class AASOpEnv:
         # Set number of torch threads to 1 to avoid issues with multiprocessing
         original_num_threads = torch.get_num_threads()
         torch.set_num_threads(1)
-        with multiprocessing.Pool() as pool:
+        with ProcessPoolExecutor() as executor:
             # Run the agent1 on the current states
-            trajectories1 = pool.map(agent1.run_parallel, ins)
-        with multiprocessing.Pool() as pool:
+            trajectories1 = list(executor.map(agent1.run_parallel, ins))
+        with ProcessPoolExecutor() as executor:
             # Run the agent2 on the current states
-            trajectories2 = pool.map(agent2.run_parallel, ins)
+            trajectories2 = list(executor.map(agent2.run_parallel, ins))
         # Reset the number of torch threads
         torch.set_num_threads(original_num_threads)
         # Get last states
@@ -364,9 +364,9 @@ class AASTrainer:
             # Set number of torch threads to 1 to avoid issues with multiprocessing
             original_num_threads = torch.get_num_threads()
             torch.set_num_threads(1)
-            with multiprocessing.Pool() as pool:
+            with ProcessPoolExecutor() as executor:
                 # Run the agent on the current state
-                trajectories = pool.map(self.agent.run_parallel, ins)
+                trajectories = list(executor.map(self.agent.run_parallel, ins))
             # Reset the number of torch threads
             torch.set_num_threads(original_num_threads)
             mcts_end_time = time.time()
@@ -378,6 +378,7 @@ class AASTrainer:
             print_info("Started execution ...")
             print_error("Number of open files:", len(psutil.Process().open_files()))
             speedups = []
+            last_states: list[OperationState] = []
             len_train_eps = 0
             for j in tqdm(range(len(trajectories)), desc='Trajectories Execution'):
                 # Get the last state of the trajectory
@@ -390,6 +391,7 @@ class AASTrainer:
                 # Add the trajectory to the data queue
                 if exec_time is not None and assertion:
                     speedups.append(last_state.bench_features.root_exec_time / exec_time)
+                    last_states.append(last_state)
                     for trajectory_state, trajectory_policy in trajectories[j]:
                         self.data.append((trajectory_state, AASNetworkEstimation(
                             policy=trajectory_policy,
@@ -410,6 +412,8 @@ class AASTrainer:
                 neptune_logs['train/final_speedup'].extend(speedups, wait=True)
             print_info("Average speedup:", sum(speedups) / len(speedups))
             print_info("Max speedup:", max(speedups))
+            max_speedup_state = last_states[speedups.index(max(speedups))]
+            print_info("Max speedup schedule:", max_speedup_state.bench_features.bench_name, max_speedup_state.transformation_history)
             print_info("Execution ended ...")
 
             # ======================== Train the agent =============================

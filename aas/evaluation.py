@@ -285,9 +285,9 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
 
     # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
-        exec_time, assertion = evaluate_code_with_bindings_and_timeout(code, state.bench_features.bench_name, timeout=timeout)
+        exec_time, assertion = evaluate_code_with_bindings(code, state.bench_features.bench_name)
     else:
-        exec_time, assertion = evaluate_code_with_cmd_and_timeout(code, tmp_file_path, timeout=timeout)
+        exec_time, assertion = evaluate_code_with_cmd(code, tmp_file_path)
     # Store the execution time in the execution database
     if (exec_time is not None) and assertion and cfg.exec_db_path:
         try:
@@ -363,9 +363,9 @@ def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_
             pass
     # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
-        exec_time, assertion = evaluate_code_with_bindings_and_timeout(code, bench_features.bench_name, timeout=timeout)
+        exec_time, assertion = evaluate_code_with_bindings(code, bench_features.bench_name)
     else:
-        exec_time, assertion = evaluate_code_with_cmd_and_timeout(code, tmp_file_path, timeout=timeout)
+        exec_time, assertion = evaluate_code_with_cmd(code, tmp_file_path)
     # Store the execution time in the execution database
     if (exec_time is not None) and assertion and cfg.exec_db_path:
         try:
