@@ -8,6 +8,7 @@ from typing import Optional, Callable, Literal, Iterable
 from copy import deepcopy
 import numpy as np
 import torch
+import multiprocessing.managers
 
 
 class AlphaAutoSchedulerStats:
@@ -42,11 +43,12 @@ class AlphaAutoScheduler:
         """
         self.action_temperature = temperature
 
-    def run(self, state: OperationState, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
+    def run(self, state: OperationState, exec_db: Optional[dict] = None, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Run the Alpha AutoScheduler on a given state and return training data about the trajectory taken by the agent.
 
         Args:
             state (OperationState): The initial operation state to optimize.
+            exec_db (Optional[dict], optional): The benchmark execution database to use. Defaults to None.
             mode (Literal['greedy', 'stochastic'], optional): The mode to run the agent. Defaults to 'stochastic'.
 
         Returns:
@@ -63,7 +65,7 @@ class AlphaAutoScheduler:
         # Run MCTS searches until a terminal node is reached
         while not node.is_terminal():
             # Get MCTS policy target
-            target_policy_estimation, next_node = mcts.run(node, n_iterations=cfg.mcts_nb_iterations, mode=mode)
+            target_policy_estimation, next_node = mcts.run(node, n_iterations=cfg.mcts_nb_iterations, exec_db=exec_db, mode=mode)
             # max_q_child = max([child for child in node.children], key=lambda x: x.q, default=None)
             # max_nb_visits_child = max([child for child in node.children], key=lambda x: x.nb_visits, default=None)
             # print(node.state.operation_tag, "Max Q", max_q_child.to_str(mcts.min_value, mcts.max_value, mcts.c_puct) if max_q_child is not None else None)
@@ -80,22 +82,21 @@ class AlphaAutoScheduler:
         # Return the trajectory
         return trajectory
 
-    def run_parallel(self, args: Iterable):
+    def run_parallel(self, id: int, output_list: multiprocessing.managers.ListProxy, args: Iterable):
         """Run the Alpha AutoScheduler on a given state and return training data about the trajectory. This ùethod should be used
         instead of the original one when doing multiprocessing.
 
         Args:
+            id (int): The id of the process.
+            output_list (multiprocessing.managers.ListProxy): The list to store the output of the agent.
             args (Iterable): The arguments to pass to the run method.
-
-        Returns:
-            list[tuple[OperationState, AASNetworkPolicyEstimation]]: The trajectory taken by the agent.
         """
         # Reseed numpy random generator
         np.random.seed()
         # Reseed torch random generator
         torch.manual_seed(np.random.randint(0, 2**32 - 1))
         # Run agent
-        return self.run(*args)
+        output_list.append((id, self.run(*args)))
 
     def train(self, data: list[tuple[OperationState, AASNetworkEstimation]]):
         """Train the Alpha AutoScheduler on given history data.

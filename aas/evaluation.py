@@ -272,16 +272,13 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
 
     # Check execution database for the execution time of the given state
     if cfg.exec_db_path:
-        try:
-            with open(cfg.exec_db_path, "r") as f:
-                exec_db = json.load(f)
-            bench_db = exec_db.get(state.bench_features.bench_name)
-            if bench_db:
-                exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
-                if exec_time:
-                    return exec_time, True, code
-        except Exception:
-            pass
+        with open(cfg.exec_db_path, "r") as f:
+            exec_db = json.load(f)
+        bench_db = exec_db.get(state.bench_features.bench_name)
+        if bench_db:
+            exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
+            if exec_time:
+                return exec_time, True, code
 
     # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
@@ -290,18 +287,15 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
         exec_time, assertion = evaluate_code_with_cmd(code, tmp_file_path)
     # Store the execution time in the execution database
     if (exec_time is not None) and assertion and cfg.exec_db_path:
-        try:
-            with open(cfg.exec_db_path, "r") as f:
-                exec_db = json.load(f)
-            bench_db = exec_db.get(state.bench_features.bench_name)
-            if not bench_db:
-                bench_db = {}
-                exec_db[state.bench_features.bench_name] = bench_db
-            exec_db[state.bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
-            with open(cfg.exec_db_path, "w") as f:
-                json.dump(exec_db, f, indent=2)
-        except Exception:
-            pass
+        with open(cfg.exec_db_path, "r") as f:
+            exec_db = json.load(f)
+        bench_db = exec_db.get(state.bench_features.bench_name)
+        if not bench_db:
+            bench_db = {}
+            exec_db[state.bench_features.bench_name] = bench_db
+        exec_db[state.bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
+        with open(cfg.exec_db_path, "w") as f:
+            json.dump(exec_db, f, indent=2)
 
     # Return the execution time and assertion result and transformed code
     return exec_time, assertion, code
@@ -351,16 +345,13 @@ def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_
 
     # Check execution database for the execution time of the given state
     if cfg.exec_db_path:
-        try:
-            with open(cfg.exec_db_path, "r") as f:
-                exec_db = json.load(f)
-            bench_db = exec_db.get(bench_features.bench_name)
-            if bench_db:
-                exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
-                if exec_time:
-                    return exec_time, True, code
-        except Exception:
-            pass
+        with open(cfg.exec_db_path, "r") as f:
+            exec_db = json.load(f)
+        bench_db = exec_db.get(bench_features.bench_name)
+        if bench_db:
+            exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
+            if exec_time:
+                return exec_time, True, code
     # Otherwise execute the code manually using Python bindings if enabled
     if cfg.use_bindings:
         exec_time, assertion = evaluate_code_with_bindings(code, bench_features.bench_name)
@@ -368,27 +359,25 @@ def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_
         exec_time, assertion = evaluate_code_with_cmd(code, tmp_file_path)
     # Store the execution time in the execution database
     if (exec_time is not None) and assertion and cfg.exec_db_path:
-        try:
-            with open(cfg.exec_db_path, "r") as f:
-                exec_db = json.load(f)
-            bench_db = exec_db.get(bench_features.bench_name)
-            if not bench_db:
-                bench_db = {}
-                exec_db[bench_features.bench_name] = bench_db
-            exec_db[bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
-            with open(cfg.exec_db_path, "w") as f:
-                json.dump(exec_db, f, indent=2)
-        except Exception:
-            pass
+        with open(cfg.exec_db_path, "r") as f:
+            exec_db = json.load(f)
+        bench_db = exec_db.get(bench_features.bench_name)
+        if not bench_db:
+            bench_db = {}
+            exec_db[bench_features.bench_name] = bench_db
+        exec_db[bench_features.bench_name][BenchmarkFeatures.any_schedule_to_str(full_schedule)] = exec_time
+        with open(cfg.exec_db_path, "w") as f:
+            json.dump(exec_db, f, indent=2)
 
     # Return the execution time and assertion result and transformed code
     return exec_time, assertion, code
 
 
-def get_cached_exec_time(state: OperationState):
+def get_cached_exec_time(exec_db: Optional[dict], state: OperationState):
     """Get the cached execution time of the given state.
 
     Args:
+        exec_db (Optional[dict]): The execution database for the benchmark.
         state (OperationState): The state to get the execution time of.
 
     Returns:
@@ -405,15 +394,7 @@ def get_cached_exec_time(state: OperationState):
     else:
         full_schedule = [state.transformation_history]
     # Check execution database for the execution time of the given state
-    try:
-        if cfg.exec_db_path:
-            with open(cfg.exec_db_path, "r") as f:
-                exec_db = json.load(f)
-            bench_db = exec_db.get(state.bench_features.bench_name)
-            if bench_db:
-                exec_time = bench_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
-                if exec_time:
-                    return exec_time
-    except Exception:
-        pass
+    if exec_db is not None:
+        return exec_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
+    # Else return None
     return None

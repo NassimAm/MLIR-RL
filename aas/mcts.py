@@ -4,7 +4,7 @@ from aas.node import Node
 from aas.state import OperationState
 from aas.evaluation import get_cached_exec_time
 import numpy as np
-from typing import Callable, Literal
+from typing import Callable, Literal, Optional
 import math
 
 
@@ -55,35 +55,43 @@ class MCTS:
         """
         node = root
         while len(node.children) > 0:
-            # Get dirichlet noise for the children
-            noises = np.random.dirichlet([0.03] * len(node.children))
+            # Get dirichlet noise for root children
+            noises = None
+            if node.parent is None:
+                noises = np.random.dirichlet([0.03] * len(node.children))
             # Calculate S scores
-            scores = np.array([child.get_s_score(self.min_value, self.max_value, self.c_puct, noise=noises[i].item()) for i, child in enumerate(node.children)])
+            scores = np.array([child.get_s_score(self.min_value, self.max_value, self.c_puct, noise=None if noises is None else noises[i].item()) for i, child in enumerate(node.children)])
             # Get the child node with the highest S score with random tie breaking
-            node_id = np.random.choice(np.flatnonzero(scores == scores.max())).item()
+            node_id = np.random.choice(np.flatnonzero(np.isclose(scores, scores.max()))).item()
             node = node.children[node_id]
         return node
 
-    def expand(self, node: Node):
+    def expand(self, node: Node, exec_db: Optional[dict] = None):
         """Expand a node in the MCTS tree by adding its children and evaluate it with value approximation.
 
         Args:
             node (Node): The node to expand.
+            exec_db (Optional[dict], optional): The benchmark execution database to use for the speedup values. Defaults to None.
         """
-        # Evaluate the node
-        aas_estimation = self.aas_network_wrapper.eval_node(node)
-        # Get the node value
-        real_exec_time = get_cached_exec_time(node.state)
-        if real_exec_time is not None:
-            # Use the real speedup if available to get the value
-            node_value = self.reward_func(node.state, real_exec_time)
+        if cfg.mcts_expansion_mode == 'old':
+            # Evaluate the node
+            aas_estimation = self.aas_network_wrapper.eval_node(node)
+            aas_estimation_policy = aas_estimation.policy
+            # Get the node value
+            real_exec_time = get_cached_exec_time(exec_db, node.state)
+            if real_exec_time is not None:
+                # Use the real speedup if available to get the value
+                node_value = self.reward_func(node.state, real_exec_time)
+            else:
+                # Otherwise, use the AAS network estimation to get the value
+                node_value = aas_estimation.get_value().item()
+            # Update the node with its value
+            node.update_leaf(node_value)
+            self.min_value = min(self.min_value, node_value)
+            self.max_value = max(self.max_value, node_value)
         else:
-            # Otherwise, use the AAS network estimation to get the value
-            node_value = aas_estimation.get_value().item()
-        # Update the node with its value
-        node.update_leaf(node_value)
-        self.min_value = min(self.min_value, node_value)
-        self.max_value = max(self.max_value, node_value)
+            # Evaluate the node policy
+            aas_estimation_policy = self.aas_network_wrapper.eval_node_policy(node)
         # Get available actions
         available_actions = node.get_available_actions()
         sum_child_node_factors = 0.0
@@ -91,7 +99,7 @@ class MCTS:
             # Get next state
             next_state = node.state.next(action)
             # Process child node exploration factor
-            child_node_factor = self.aas_network_wrapper.get_action_prob(node.state, action, aas_estimation.policy)
+            child_node_factor = self.aas_network_wrapper.get_action_prob(node.state, action, aas_estimation_policy)
             sum_child_node_factors += child_node_factor
             # Add child node to the tree
             node.add_child(next_state, child_node_factor)
@@ -99,6 +107,19 @@ class MCTS:
         for child in node.children:
             # Normalize the child node exploration factor
             child.node_exploration_factor /= sum_child_node_factors
+            if cfg.mcts_expansion_mode == 'new':
+                # Get the child node value
+                real_exec_time = get_cached_exec_time(exec_db, child.state)
+                if real_exec_time is not None:
+                    # Use the real speedup if available to get the value
+                    child_value = self.reward_func(child.state, real_exec_time)
+                else:
+                    # Otherwise, use the AAS network estimation to get the value
+                    child_value = self.aas_network_wrapper.eval_node_value(child)
+                # Update the child node with its value
+                child.update_leaf(child_value)
+                self.min_value = min(self.min_value, child_value)
+                self.max_value = max(self.max_value, child_value)
 
     def backpropagate(self, node: Node):
         """Backpropagate the speedup value up the MCTS tree.
@@ -116,13 +137,14 @@ class MCTS:
             child = parent
             parent = parent.parent
 
-    def run(self, root: Node, n_iterations: int, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
+    def run(self, root: Node, n_iterations: int, exec_db: Optional[dict] = None, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Perform the MCTS search for a given number of iterations and convert
          action probabilities to AASNetwork policy estimation.
 
         Args:
             root (Node): The root node of the MCTS tree.
             n_iterations (int): The number of iterations to perform the search.
+            exec_db (Optional[dict], optional): The benchmark execution database to use for the speedup values. Defaults to None.
             mode (Literal['greedy', 'stochastic'], optional): The mode to use for the action probabilities. Defaults to 'stochastic'.
 
         Returns:
@@ -135,7 +157,7 @@ class MCTS:
         # Run the MCTS search for a given number of iterations
         for _ in range(n_iterations):
             node = self.select(root)
-            self.expand(node)
+            self.expand(node, exec_db)
             self.backpropagate(node)
         # Calculate next policy estimation
         aas_policy_estimation, max_p_node = self.aas_network_wrapper.evaluate_tree(root, self.action_temperature, mode=mode)

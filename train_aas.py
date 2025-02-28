@@ -20,7 +20,7 @@ print_info('Configuration:')
 print_info(cfg)
 
 # Set neptune logs if enabled
-neptune_logs = init_neptune(['aas'] + cfg.tags, cfg_path=os.getenv('AAS_CONFIG_FILE_PATH'), mode='sync') if cfg.logging else None
+neptune_logs = init_neptune(['aas'] + cfg.tags, algo="aas", cfg_path=os.getenv('AAS_CONFIG_FILE_PATH'), mode='sync') if cfg.logging else None
 
 # Start training
 print_info('Start training ... ')
