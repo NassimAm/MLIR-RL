@@ -1,12 +1,11 @@
 from aas import config as cfg
 from aas.node import Node
-from aas.nn import AASNetwork, BSELoss, CrossEntropyLoss
+from aas.nn import AASNetwork, CrossEntropyLoss
 from aas.action import Action, Parallelization, Vectorization, NoTransformation
 from aas.state import OperationState
 import torch
 from utils.torch_utils import sample_from_dist
 from typing import Optional, Literal
-torch.set_printoptions(threshold=10_000)
 
 
 class AASNetworkPolicyEstimation:
@@ -144,10 +143,7 @@ class AASNetworkWrapper:
         self.model = model
         # Define losses
         self.ce_loss = CrossEntropyLoss()
-        if cfg.mcts_estimation_mode == 'VEMS':
-            self.value_loss = BSELoss()
-        else:
-            self.value_loss = torch.nn.MSELoss()
+        self.value_loss = torch.nn.MSELoss()
         # Define the optimizer
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=cfg.learning_rate)
         # Set stats

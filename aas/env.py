@@ -1,3 +1,4 @@
+import multiprocessing.managers
 from aas import config as cfg
 from aas.observation.benchmark import BenchmarkFeatures, extract_bench_features_from_file, extract_bench_features_from_code
 from aas.observation.operation import extract_op_features_from_code
@@ -23,6 +24,8 @@ import time
 # To avoid leaking file descriptors when using multiprocessing
 # https://github.com/pytorch/pytorch/issues/973#issuecomment-604473515
 torch.multiprocessing.set_sharing_strategy('file_system')
+# Set the number of threads for torch
+torch.set_num_threads(4)
 
 
 class AASOpEnv:
@@ -200,11 +203,9 @@ class AASOpEnv:
             agent (AlphaAutoScheduler): The agent to evaluate.
 
         Returns:
-            list[str]: The names of the benchmarks.
             list[float]: The speedups reached by the agent.
         """
         # Run specified number of full benchmark episodes
-        bench_names = []
         speedups = []
         state = self.reset()
         for _ in tqdm(range(len(self.benchmarks_data)), desc="Evaluation"):
@@ -224,10 +225,9 @@ class AASOpEnv:
             root_exec_time = bench_features.root_exec_time
             if exec_time is not None and assertion:
                 speedup = root_exec_time / exec_time
-                bench_names.append(bench_features.bench_name)
                 speedups.append(speedup)
         # Return the speedups
-        return bench_names, speedups
+        return speedups
 
 
 class AASTrainer:
@@ -245,6 +245,8 @@ class AASTrainer:
     """The data queue to store training data."""
     save_file_path: str
     """The path to save the agent to."""
+    train_output_list: multiprocessing.managers.ListProxy
+    """The list to store the output of the parallel MCTS searches."""
 
     def __init__(self, env_type: Literal["op"] = "op", save_file_path: Optional[str] = None):
         """Initialize the trainer.
@@ -266,39 +268,29 @@ class AASTrainer:
             self.save_file_path = save_file_path
         self.agent = AlphaAutoScheduler(self.train_env.get_reward)
         self.agent.save(self.save_file_path)
-        self.prev_agent = None
+        self.prev_agent = self.agent.copy()
         # Initialize data queue
         self.data = deque(maxlen=cfg.data_queue_max_length)
         # Initialize pipes for parallel MCTS searches
         manager = multiprocessing.Manager()
         self.train_output_list = manager.list()
-        self.pit_output_list_1 = manager.list()
-        self.pit_output_list_2 = manager.list()
 
     def train(self, neptune_logs: Optional[neptune.Run] = None):
         """Train the agent to optimize benchmarks."""
         # Initialize the environment
         prev_eval_speedups: Optional[list] = None
-        prev_eval_bench_names: Optional[list[str]] = None
-        agent_eval_changed = False
-        # Read execution database
         exec_db: Optional[dict] = None
-        if cfg.exec_db_path:
-            with open(cfg.exec_db_path, "r") as f:
-                exec_db = json.load(f)
-        # Get training states
-        ins: list[tuple[OperationState]] = []
-        state = self.train_env.reset()
-        for _ in range(cfg.nb_train_eps):
-            # Add the current state to the training states
-            ins.append((state, exec_db.get(state.bench_features.bench_name)))
-            # Take a step in the environment
-            state, _ = self.train_env.step(state)
+        train_state = self.train_env.reset()
         # Loop trough iterations
         for i in tqdm(range(cfg.nb_iterations), desc="Main Loop"):
             # Set agent temperature
             self.agent.set_temperature(1.0 if i < 500 else 0.5 if i < 750 else 0.25)
             # ======================== Gather training data ========================
+            # Read execution database
+            if cfg.exec_db_path:
+                with open(cfg.exec_db_path, "r") as f:
+                    exec_db = json.load(f)
+            # Start MCTS searches
             print_info("Started MCTS search ...")
             mcts_start_time = time.time()
             # Clear the output list
@@ -308,11 +300,12 @@ class AASTrainer:
             torch.set_num_threads(1)
             processes: list[multiprocessing.Process] = []
             # Run MCTS searches in parallel
-            for id, inp in enumerate(ins):
+            for id in range(cfg.nb_train_eps):
                 # Run the agent on the current state
-                process = multiprocessing.Process(target=self.agent.run_parallel, args=(id, self.train_output_list, inp))
+                process = multiprocessing.Process(target=self.agent.run_parallel, args=(id, self.train_output_list, (train_state, exec_db.get(train_state.bench_features.bench_name))))
                 process.start()
                 processes.append(process)
+                train_state, _ = self.train_env.step(train_state)
             # Wait for all processes to finish
             for process in processes:
                 process.join()
@@ -328,20 +321,16 @@ class AASTrainer:
             # ======================== Execute trajectories ========================
             print_info("Started execution ...")
             speedups = []
-            last_states: list[OperationState] = []
-            len_train_eps = 0
             for j in tqdm(range(len(trajectories)), desc='Trajectories Execution'):
                 # Get the last state of the trajectory
                 last_state, _ = trajectories[j][-1]
-                len_train_eps += len(last_state.transformation_history)
                 # Run the code with last state transformation list
                 exec_time, assertion, transformed_code = evaluate_code_with_timeout(last_state, self.train_env.tmp_file_path)
-                # Get the reward
-                value = self.train_env.get_reward(last_state, exec_time)
                 # Add the trajectory to the data queue
                 if exec_time is not None and assertion:
+                    # Get the reward
+                    value = self.train_env.get_reward(last_state, exec_time)
                     speedups.append(last_state.bench_features.root_exec_time / exec_time)
-                    last_states.append(last_state)
                     for trajectory_state, trajectory_policy in trajectories[j]:
                         self.data.append((trajectory_state, AASNetworkEstimation(
                             policy=trajectory_policy,
@@ -362,13 +351,9 @@ class AASTrainer:
                 neptune_logs['train/final_speedup'].extend(speedups, wait=True)
             print_info("Average speedup:", sum(speedups) / len(speedups))
             print_info("Max speedup:", max(speedups))
-            max_speedup_state = last_states[speedups.index(max(speedups))]
-            print_info("Max speedup schedule:", max_speedup_state.bench_features.bench_name, max_speedup_state.transformation_history)
             print_info("Execution ended ...")
 
             # ======================== Train the agent =============================
-            # Load the previous agent
-            self.prev_agent = self.agent.copy()
             # Train the current agent
             print_info("Started training ...")
             train_stats = self.agent.train(list(self.data))
@@ -379,150 +364,54 @@ class AASTrainer:
                     neptune_logs[f'train/parallel_params_loss_{j}'].extend(train_stats.parallel_params_loss[j], wait=True)
             print_info("Training ended ...")
 
-            # ======================= Get training data ============================
-            # Read execution database
-            if cfg.exec_db_path:
-                with open(cfg.exec_db_path, "r") as f:
-                    exec_db = json.load(f)
-            # Get training states
-            ins.clear()
-            state = self.train_env.reset()
-            for _ in range(cfg.nb_train_eps):
-                # Add the current state to the training states
-                ins.append((state, exec_db.get(state.bench_features.bench_name)))
-                # Take a step in the environment
-                state, _ = self.train_env.step(state)
-
-            # ========== Evaluate the agent with MCTS for next training ============
-            if cfg.pitting:
-                # Compare between the current agent and the previous one
-                print_info("Started comparison ...")
-                score, speedups1, speedups2 = self.pit(ins, self.agent, self.prev_agent)
-                print_info("Score:", score)
-                # If the agent did not improve, load the previous agent
-                if score < 0:
-                    # Load the previous agent
-                    self.agent = self.prev_agent
-                    print_alert("Agent did not improve, loading the previous agent ...")
-                    if neptune_logs is not None and len(speedups2) > 0:
-                        neptune_logs['eval/comp/final_speedup'].extend(speedups2, wait=True)
-                else:
-                    # Keep the current agent
-                    agent_eval_changed = True
-                    print_success("Agent improved, keeping the current agent ...")
-                    if neptune_logs is not None and len(speedups1) > 0:
-                        neptune_logs['eval/comp/final_speedup'].extend(speedups1, wait=True)
-                print_info("Comparison ended ...")
-            else:
-                agent_eval_changed = True
-
             # ================ Evaluate the agent without MCTS =====================
             if i % 5 == 0:
                 print_info("Started evaluation ...")
-                if agent_eval_changed or prev_eval_speedups is None or prev_eval_bench_names is None:
-                    bench_names, greedy_speedups = self.eval_env.eval(self.agent, mode='greedy')
-                    prev_eval_bench_names = bench_names
-                    prev_eval_speedups = greedy_speedups
-                avg_greedy_speedup = sum(prev_eval_speedups) / len(prev_eval_speedups) if len(prev_eval_speedups) > 0 else 0.0
-                print_info("Greedy speedups average:", avg_greedy_speedup)
+                eval_speedups = self.eval_env.eval(self.agent, mode='greedy')
+                avg_eval_speedup = sum(eval_speedups) / len(eval_speedups) if len(eval_speedups) > 0 else 0.0
+                print_info("Greedy speedups average:", avg_eval_speedup)
                 if neptune_logs is not None:
-                    if len(prev_eval_speedups) > 0:
-                        neptune_logs['eval/final_speedup'].extend(prev_eval_speedups, wait=True)
-                        neptune_logs['eval/average_speedup'].append(avg_greedy_speedup, wait=True)
-                        for bench_name, speedup in zip(prev_eval_bench_names, prev_eval_speedups):
-                            neptune_logs[f'eval/{bench_name}'].append(speedup, wait=True)
-                agent_eval_changed = False
+                    if len(eval_speedups) > 0:
+                        neptune_logs['eval/final_speedup'].extend(eval_speedups, wait=True)
+                        neptune_logs['eval/average_speedup'].append(avg_eval_speedup, wait=True)
+                        bench_names = [bench.bench_name for bench in self.eval_env.benchmarks_data]
+                        for bench_name, eval_speedup in zip(bench_names, eval_speedups):
+                            neptune_logs[f'eval/{bench_name}'].append(eval_speedup, wait=True)
+                if cfg.pitting:
+                    score = self.pit(eval_speedups, prev_eval_speedups)
+                    if score >= 0:
+                        print_success("Agent improved over the previous one with a score of", score)
+                        prev_eval_speedups = eval_speedups
+                        self.prev_agent = self.agent.copy()
+                    else:
+                        print_alert("Agent did not improve over the previous one with a score of", score)
+                        self.agent = self.prev_agent
                 print_info("Evaluation ended ...")
 
             # ====================== Save the best agent ===========================
             # Save the best agent so far
             self.agent.save(self.save_file_path)
 
-    def pit(self, inputs: list[tuple[OperationState, Optional[dict]]], agent1: AlphaAutoScheduler, agent2: AlphaAutoScheduler):
+    def pit(self, speedups1: list[float], speedups2: list[float]):
         """Compare two agents on a set of benchmarks.
 
         Args:
-            inputs (list[tuple[OperationState, Optional[dict]]]): The input data to compare the agents on.
-            agent1 (AlphaAutoScheduler): The first agent to compare.
-            agent2 (AlphaAutoScheduler): The second agent to compare.
+            speedups1 (list[float]): The speedups of the first agent.
+            speedups2 (list[float]): The speedups of the second agent.
 
         Returns:
             float: The score of the comparison.
-            list[float]: The speedups of the first agent.
-            list[float]: The speedups of the second agent.
         """
-        # Run specified number of full benchmark episodes
+        # Initialize the score
         score = 0
-        speedups1: list[float] = []
-        speedups2: list[float] = []
-        ins: list[tuple[OperationState, str]] = []
-        terminated_list: list[bool] = []
-        mcts_start_time = time.time()
-        # Gather states
-        for (state, exec_db) in inputs:
-            # Add the current state to the list of states
-            ins.append((state, exec_db, 'greedy'))
-            terminated_list.append(state.is_final())
-        # Clear the output lists
-        self.pit_output_list_1[:] = []
-        self.pit_output_list_2[:] = []
-        # Set number of torch threads to 1 to avoid issues with multiprocessing
-        original_num_threads = torch.get_num_threads()
-        torch.set_num_threads(1)
-        processes: list[multiprocessing.Process] = []
-        for id, inp in enumerate(ins):
-            # Run the agent1 on the current states
-            process1 = multiprocessing.Process(target=agent1.run_parallel, args=(id, self.pit_output_list_1, inp))
-            process1.start()
-            processes.append(process1)
-            # Run the agent2 on the current states
-            process2 = multiprocessing.Process(target=agent2.run_parallel, args=(id, self.pit_output_list_2, inp))
-            process2.start()
-            processes.append(process2)
-        # Wait for all processes to finish
-        for process in processes:
-            process.join()
-            process.close()
-        # Get trajectories
-        trajectories1: list[list[tuple[OperationState, AASNetworkEstimation]]] = [trajectory for (_, trajectory) in sorted(list(self.pit_output_list_1), key=lambda x: x[0])]
-        trajectories2: list[list[tuple[OperationState, AASNetworkEstimation]]] = [trajectory for (_, trajectory) in sorted(list(self.pit_output_list_2), key=lambda x: x[0])]
-        # Reset the number of torch threads
-        torch.set_num_threads(original_num_threads)
-        # Get last states
-        bench_states1: list[list[OperationState]] = []
-        bench_states2: list[list[OperationState]] = []
-        tmp_states1 = []
-        tmp_states2 = []
-        for trajectory1, trajectory2, terminated in zip(trajectories1, trajectories2, terminated_list):
-            tmp_states1.append(trajectory1[-1][0])
-            tmp_states2.append(trajectory2[-1][0])
-            if terminated:
-                bench_states1.append(tmp_states1)
-                bench_states2.append(tmp_states2)
-                tmp_states1 = []
-                tmp_states2 = []
-        # Get MCTS search time
-        mcts_end_time = time.time()
-        print_info(f"MCTS Search ended in {mcts_end_time - mcts_start_time} s ...")
-        # Execute optimized operations
-        for i in tqdm(range(len(bench_states1)), desc="Evaluation execution"):
-            last_states1 = bench_states1[i]
-            last_states2 = bench_states2[i]
-            bench_features = last_states1[0].bench_features
-            # Evaluate the transformed code
-            exec_time1, assertion1, _ = evaluate_benchmark_code_with_timeout(last_states1, self.train_env.tmp_file_path)
-            exec_time2, assertion2, _ = evaluate_benchmark_code_with_timeout(last_states2, self.train_env.tmp_file_path)
-            # Calculate speedups
-            root_exec_time = bench_features.root_exec_time
-            speedup1 = root_exec_time / exec_time1 if exec_time1 is not None and assertion1 else 1.0
-            speedup2 = (root_exec_time / exec_time2 if exec_time2 is not None and assertion2 else 1.0)
-            print_info(f"Speedup1: {speedup1}, Speedup2: {speedup2}")
-            # Calculate score based on ratio between speedups (positive score = keep new agent, negative score = keep old agent)
+        # Check if speedups are available
+        if not speedups1 or not speedups2:
+            return score
+        # Calculate score based on ratio between speedups (positive score = keep new agent, negative score = keep old agent)
+        for speedup1, speedup2 in zip(speedups1, speedups2):
             score += (speedup1 / speedup2 - 1.0) if speedup1 >= speedup2 else -(speedup2 / speedup1 - 1.0)
-            speedups1.append(speedup1)
-            speedups2.append(speedup2)
         # Return the score
-        return score, speedups1, speedups2
+        return score
 
     def get_best_agent(self):
         """Load the best agent so far.
