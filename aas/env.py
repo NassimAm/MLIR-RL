@@ -15,8 +15,7 @@ import json
 from tqdm import tqdm
 from collections import deque
 import math
-from utils.log import print_info, print_alert, print_success, print_error
-import neptune
+from utils.log import print_info, print_alert, print_success, print_error, FileLogger
 import torch
 import multiprocessing
 import time
@@ -247,6 +246,8 @@ class AASTrainer:
     """The path to save the agent to."""
     train_output_list: multiprocessing.managers.ListProxy
     """The list to store the output of the parallel MCTS searches."""
+    file_logger: FileLogger
+    """The file logger to log the training and evaluation data in files."""
 
     def __init__(self, env_type: Literal["op"] = "op", save_file_path: Optional[str] = None):
         """Initialize the trainer.
@@ -274,8 +275,12 @@ class AASTrainer:
         # Initialize pipes for parallel MCTS searches
         manager = multiprocessing.Manager()
         self.train_output_list = manager.list()
+        # Initialize file logger
+        self.file_logger = FileLogger()
+        if cfg.logging:
+            self.file_logger.upload_dict('config.json', cfg.to_dict(), indent=2)
 
-    def train(self, neptune_logs: Optional[neptune.Run] = None):
+    def train(self):
         """Train the agent to optimize benchmarks."""
         # Initialize the environment
         prev_eval_speedups: Optional[list] = None
@@ -314,12 +319,16 @@ class AASTrainer:
             torch.set_num_threads(original_num_threads)
             trajectories: list[list[tuple[OperationState, AASNetworkEstimation]]] = [trajectory for _, trajectory in sorted(list(self.train_output_list), key=lambda x: x[0])]
             mcts_end_time = time.time()
+            mcts_duration = mcts_end_time - mcts_start_time
+            if cfg.logging:
+                self.file_logger.append('train/mcts_duration', mcts_duration)
             print_info("Number of trajectories:", len(trajectories))
             print_info("Total number of data points:", sum(len(trajectory) for trajectory in trajectories))
-            print_info(f"MCTS search ended in {mcts_end_time - mcts_start_time} s ...")
+            print_info(f"MCTS search ended in {mcts_duration} s ...")
 
             # ======================== Execute trajectories ========================
             print_info("Started execution ...")
+            exec_start_time = time.time()
             speedups = []
             for j in tqdm(range(len(trajectories)), desc='Trajectories Execution'):
                 # Get the last state of the trajectory
@@ -347,36 +356,45 @@ class AASTrainer:
                     else:
                         print_error(f"ASSERTION FAILED: ({last_state.bench_features.bench_name} {last_state.operation_tag})")
                         print_error("ACTIONS:", last_state.transformation_history)
-            if neptune_logs is not None and len(speedups) > 0:
-                neptune_logs['train/final_speedup'].extend(speedups, wait=True)
+            if cfg.logging:
+                self.file_logger.extend('train/final_speedup', speedups)
             print_info("Average speedup:", sum(speedups) / len(speedups))
             print_info("Max speedup:", max(speedups))
-            print_info("Execution ended ...")
+            exec_end_time = time.time()
+            exec_duration = exec_end_time - exec_start_time
+            if cfg.logging:
+                self.file_logger.append('train/execution_duration', exec_duration)
+            print_info(f"Execution ended in {exec_duration} s ...")
 
             # ======================== Train the agent =============================
             # Train the current agent
             print_info("Started training ...")
+            train_start_time = time.time()
             train_stats = self.agent.train(list(self.data))
-            if neptune_logs is not None:
-                neptune_logs['train/selection_loss'].extend(train_stats.selection_loss, wait=True)
-                neptune_logs['train/value_loss'].extend(train_stats.value_loss, wait=True)
+            if cfg.logging:
+                self.file_logger.extend('train/selection_loss', train_stats.selection_loss)
+                self.file_logger.extend('train/value_loss', train_stats.value_loss)
                 for j in range(cfg.max_num_loops):
-                    neptune_logs[f'train/parallel_params_loss_{j}'].extend(train_stats.parallel_params_loss[j], wait=True)
-            print_info("Training ended ...")
+                    self.file_logger.extend(f'train/parallel_params_loss_{j}', train_stats.parallel_params_loss[j])
+            train_end_time = time.time()
+            train_duration = train_end_time - train_start_time
+            if cfg.logging:
+                self.file_logger.append('train/train_duration', train_duration)
+            print_info(f"Training ended in {train_duration} s ...")
 
             # ================ Evaluate the agent without MCTS =====================
             if i % 5 == 0:
                 print_info("Started evaluation ...")
+                eval_start_time = time.time()
                 eval_speedups = self.eval_env.eval(self.agent, mode='greedy')
                 avg_eval_speedup = sum(eval_speedups) / len(eval_speedups) if len(eval_speedups) > 0 else 0.0
                 print_info("Greedy speedups average:", avg_eval_speedup)
-                if neptune_logs is not None:
-                    if len(eval_speedups) > 0:
-                        neptune_logs['eval/final_speedup'].extend(eval_speedups, wait=True)
-                        neptune_logs['eval/average_speedup'].append(avg_eval_speedup, wait=True)
-                        bench_names = [bench.bench_name for bench in self.eval_env.benchmarks_data]
-                        for bench_name, eval_speedup in zip(bench_names, eval_speedups):
-                            neptune_logs[f'eval/{bench_name}'].append(eval_speedup, wait=True)
+                if cfg.logging:
+                    self.file_logger.extend('eval/final_speedup', eval_speedups)
+                    self.file_logger.append('eval/average_speedup', avg_eval_speedup)
+                    bench_names = [bench.bench_name for bench in self.eval_env.benchmarks_data]
+                    for bench_name, eval_speedup in zip(bench_names, eval_speedups):
+                        self.file_logger.append(f'eval/{bench_name}', eval_speedup)
                 if cfg.pitting:
                     score = self.pit(eval_speedups, prev_eval_speedups)
                     if score >= 0:
@@ -386,7 +404,11 @@ class AASTrainer:
                     else:
                         print_alert("Agent did not improve over the previous one with a score of", score)
                         self.agent = self.prev_agent
-                print_info("Evaluation ended ...")
+                eval_end_time = time.time()
+                eval_duration = eval_end_time - eval_start_time
+                if cfg.logging:
+                    self.file_logger.append('eval/eval_duration', eval_duration)
+                print_info(f"Evaluation ended in {eval_duration} s ...")
 
             # ====================== Save the best agent ===========================
             # Save the best agent so far

@@ -7,9 +7,15 @@ def init_neptune(tags: list, algo: Literal["ras", "aas"] = "ras", mode: Literal[
     # Get tags
     tags = list(map(str, tags))
     # Initialize neptune run
+    neptune_project = os.getenv('NEPTUNE_PROJECT')
+    if not neptune_project:
+        raise ValueError('NEPTUNE_PROJECT is not set')
+    neptune_token = os.getenv('NEPTUNE_TOKEN')
+    if not neptune_token:
+        raise ValueError('NEPTUNE_TOKEN is not set')
     run = neptune.init_run(
-        project=os.getenv('NEPTUNE_PROJECT'),
-        api_token=os.getenv('NEPTUNE_TOKEN'),
+        project=neptune_project,
+        api_token=neptune_token,
         tags=tags,
         mode=mode
     )

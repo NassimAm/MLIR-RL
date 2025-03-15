@@ -1,7 +1,7 @@
 import os
 from utils.singleton import Singleton
 import json
-from typing import Literal
+from typing import Literal, Optional
 
 
 class RASConfig(metaclass=Singleton):
@@ -77,10 +77,16 @@ class RASConfig(metaclass=Singleton):
         self.logging = True
         self.loaded = False
 
-    def load_from_json(self):
-        """Load the configuration from the JSON file."""
+    def load_from_json(self, path: Optional[str] = None):
+        """Load the configuration from the JSON file.
+
+        Args:
+            path (Optional[str]): The path to the JSON file.
+        """
         # Open the JSON file
-        with open(os.getenv("RAS_CONFIG_FILE_PATH"), "r") as f:
+        if path is None:
+            path = os.getenv("RAS_CONFIG_FILE_PATH")
+        with open(path, "r") as f:
             config = json.load(f)
         # Set the configuration values
         self.max_num_stores_loads = config["max_num_stores_loads"]
@@ -251,10 +257,16 @@ class AASConfig(metaclass=Singleton):
         self.logging = True
         self.loaded = False
 
-    def load_from_json(self):
-        """Load the configuration from the JSON file."""
+    def load_from_json(self, path: Optional[str] = None):
+        """Load the configuration from the JSON file.
+
+        Args:
+            path (Optional[str]): The path to the JSON file.
+        """
         # Open the JSON file
-        with open(os.getenv("AAS_CONFIG_FILE_PATH"), "r") as f:
+        if path is None:
+            path = os.getenv("AAS_CONFIG_FILE_PATH")
+        with open(path, "r") as f:
             config = json.load(f)
         # Set the configuration values
         self.nb_iterations = config["nb_iterations"]
