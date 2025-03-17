@@ -7,6 +7,7 @@
     "nb_eval_eps": 32,
     "normalize_features": true,
     "learning_rate": 0.01,
+    "l2_reg": 0.0001,
     "pitting": false,
     "mcts_max_num_tile_combinations": -1,
     "mcts_nb_iterations": 1600,

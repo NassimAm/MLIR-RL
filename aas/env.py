@@ -206,8 +206,8 @@ class AASOpEnv:
         """
         # Run specified number of full benchmark episodes
         speedups = []
-        state = self.reset()
-        for _ in tqdm(range(len(self.benchmarks_data)), desc="Evaluation"):
+        state = self.reset(idx=0)
+        for i in range(len(self.benchmarks_data)):
             optimized_states: list[OperationState] = []
             terminated = False
             while not terminated:
@@ -222,8 +222,10 @@ class AASOpEnv:
             # Calculate speedup
             bench_features = optimized_states[0].bench_features
             root_exec_time = bench_features.root_exec_time
+            print_info(f"Evaluation ({i + 1}/{len(self.benchmarks_data)}): {bench_features.bench_name}")
             if exec_time is not None and assertion:
                 speedup = root_exec_time / exec_time
+                print_success(f"Schedule: {optimized_states[0].transformation_history} - {speedup}")
                 speedups.append(speedup)
         # Return the speedups
         return speedups
@@ -272,6 +274,7 @@ class AASTrainer:
         self.prev_agent = self.agent.copy()
         # Initialize data queue
         self.data = deque(maxlen=cfg.data_queue_max_length)
+        self.prev_data = self.data.copy()
         # Initialize pipes for parallel MCTS searches
         manager = multiprocessing.Manager()
         self.train_output_list = manager.list()
@@ -401,9 +404,11 @@ class AASTrainer:
                         print_success("Agent improved over the previous one with a score of", score)
                         prev_eval_speedups = eval_speedups
                         self.prev_agent = self.agent.copy()
+                        self.prev_data = self.data.copy()
                     else:
                         print_alert("Agent did not improve over the previous one with a score of", score)
                         self.agent = self.prev_agent
+                        self.data = self.prev_data
                 eval_end_time = time.time()
                 eval_duration = eval_end_time - eval_start_time
                 if cfg.logging:

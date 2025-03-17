@@ -168,6 +168,8 @@ class AASConfig(metaclass=Singleton):
     """Flag to normalize the features"""
     learning_rate: float
     """Learning rate"""
+    l2_reg: float
+    """L2 regularization coefficient"""
     quantile_alpha: float
     """Quantile alpha value for the quantile loss"""
     pitting: bool
@@ -234,6 +236,7 @@ class AASConfig(metaclass=Singleton):
         self.nb_eval_eps = 10
         self.normalize_features = False
         self.learning_rate = 0.001
+        self.l2_reg = 0.0001
         self.pitting = True
         self.mcts_max_num_tile_combinations = -1
         self.mcts_nb_iterations = 1000
@@ -277,6 +280,7 @@ class AASConfig(metaclass=Singleton):
         self.nb_eval_eps = config["nb_eval_eps"]
         self.normalize_features = config["normalize_features"]
         self.learning_rate = config["learning_rate"]
+        self.l2_reg = config["l2_reg"]
         self.pitting = config["pitting"]
         self.mcts_max_num_tile_combinations = config["mcts_max_num_tile_combinations"]
         self.mcts_nb_iterations = config["mcts_nb_iterations"]
@@ -318,6 +322,7 @@ class AASConfig(metaclass=Singleton):
             "nb_eval_eps": self.nb_eval_eps,
             "normalize_features": self.normalize_features,
             "learning_rate": self.learning_rate,
+            "l2_reg": self.l2_reg,
             "pitting": self.pitting,
             "mcts_max_num_tile_combinations": self.mcts_max_num_tile_combinations,
             "mcts_nb_iterations": self.mcts_nb_iterations,

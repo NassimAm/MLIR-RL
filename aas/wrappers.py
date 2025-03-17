@@ -1,6 +1,6 @@
 from aas import config as cfg
 from aas.node import Node
-from aas.nn import AASNetwork, CrossEntropyLoss
+from aas.nn import AASNetwork
 from aas.action import Action, Parallelization, Vectorization, NoTransformation
 from aas.state import OperationState
 import torch
@@ -15,6 +15,8 @@ class AASNetworkPolicyEstimation:
     """Probabilities predicted by the select network."""
     parallel_params_probs: torch.Tensor
     """Probabilities predicted by the parallelization parameters network."""
+    is_no_action: bool
+    """Flag to indicate if the policy estimation is for no transformation action."""
 
     def __init__(self, select_probs: torch.Tensor, parallel_params_probs: torch.Tensor):
         """Initialize the AAS network policy estimation.
@@ -25,6 +27,7 @@ class AASNetworkPolicyEstimation:
         """
         self.select_probs = select_probs
         self.parallel_params_probs = parallel_params_probs
+        self.is_no_action = False
 
     def get_action_from_hierarchical_probs(self, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
         """Get the action selected in a hierarchical manner given the estimation.
@@ -57,11 +60,21 @@ class AASNetworkPolicyEstimation:
         Returns:
             AASNetworkPolicyEstimation: The AAS network policy estimation for no transformation action.
         """
-        # Return the AAS network policy estimation
-        return AASNetworkPolicyEstimation(
-            select_probs=torch.zeros(cfg.num_transformations),
-            parallel_params_probs=torch.zeros((cfg.max_num_loops, cfg.num_tile_sizes + 1))
+        # Get select probabilities
+        select_probs = torch.zeros(cfg.num_transformations)
+        select_probs[NoTransformation.ID] = 1.0
+        # Get parallelization parameters probabilities
+        parallel_params_probs = torch.zeros((cfg.max_num_loops, cfg.num_tile_sizes + 1))
+        parallel_params_probs[:, 0] = 1.0
+        # Create the AAS network policy estimation
+        aas_estimation = AASNetworkPolicyEstimation(
+            select_probs=select_probs,
+            parallel_params_probs=parallel_params_probs
         )
+        # Set the flag for no transformation action
+        aas_estimation.is_no_action = True
+        # Return the AAS network policy estimation
+        return aas_estimation
 
     def is_no_action_estimation(self):
         """Check if the policy estimation is for no transformation action.
@@ -69,7 +82,7 @@ class AASNetworkPolicyEstimation:
         Returns:
             bool: True if the policy estimation is for no transformation action, False otherwise.
         """
-        return (self.select_probs.sum() == 0).item()
+        return self.is_no_action
 
     def __repr__(self):
         """Get the string representation of the AAS network policy estimation."""
@@ -142,10 +155,10 @@ class AASNetworkWrapper:
         # Set the model
         self.model = model
         # Define losses
-        self.ce_loss = CrossEntropyLoss()
+        self.ce_loss = torch.nn.CrossEntropyLoss(reduction='none')
         self.value_loss = torch.nn.MSELoss()
         # Define the optimizer
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=cfg.learning_rate)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.l2_reg)
         # Set stats
         self.stats = AASNetworkManagerStats()
 
@@ -207,12 +220,12 @@ class AASNetworkWrapper:
                 parallel_params_probs_target_batch = parallel_params_probs_target[batch_start:batch_end]
                 value_target_batch = value_target[batch_start:batch_end]
                 # Make a forward pass (train mode)
-                select_probs_pred, parallel_params_probs_pred, value_pred = self.model(input_tensors_batch)
+                select_probs_logits, parallel_params_probs_logits, value_pred = self.model(input_tensors_batch)
                 # Reset gradients
                 self.optimizer.zero_grad()
                 # Calculate losses
-                sl = self.ce_loss(select_probs_pred, select_probs_target_batch, mask=policy_mask_batch)
-                ppls = torch.concatenate([self.ce_loss(parallel_params_probs_pred[:, i, :], parallel_params_probs_target_batch[:, i, :], mask=parallel_params_mask_batch[:, i]).unsqueeze(0) for i in range(cfg.max_num_loops)])
+                sl = torch.mean(self.ce_loss(select_probs_logits, select_probs_target_batch) * policy_mask_batch)
+                ppls = torch.concatenate([torch.mean(self.ce_loss(parallel_params_probs_logits[:, i, :], parallel_params_probs_target_batch[:, i, :]) * parallel_params_mask_batch[:, i]).unsqueeze(0) for i in range(cfg.max_num_loops)])
                 vl = self.value_loss(value_pred, value_target_batch)
                 # Save losses for stats
                 if cfg.logging:
@@ -225,12 +238,6 @@ class AASNetworkWrapper:
                 loss.backward()
                 # Optimize parameters
                 self.optimizer.step()
-            # Save stats
-            if cfg.logging:
-                self.stats.selection_loss.append(sl.item())
-                for i in range(cfg.max_num_loops):
-                    self.stats.parallel_params_loss[i].append(ppls[i].item())
-                self.stats.value_loss.append(vl.item())
 
     def get_action_mask(self, state: OperationState, policy: AASNetworkPolicyEstimation):
         """Get the mask for target policy in given state.
@@ -298,20 +305,20 @@ class AASNetworkWrapper:
             # Set model to evaluation mode
             self.model.eval()
             # Make prediction
-            select_probs, parallel_params_probs, value = self.model(node.state.to_tensor().unsqueeze(0))
-            select_probs = select_probs.squeeze(0)
-            parallel_params_probs = parallel_params_probs.squeeze(0)
+            select_logits, parallel_params_logits, value = self.model(node.state.to_tensor().unsqueeze(0))
+            select_logits = select_logits.squeeze(0)
+            parallel_params_logits = parallel_params_logits.squeeze(0)
             value = value.squeeze(0)
             # Set model back to training mode
             self.model.train()
-        # Create the AASNetwork estimation
-        aas_estimation = AASNetworkEstimation(
-            policy=AASNetworkPolicyEstimation(
-                select_probs=select_probs,
-                parallel_params_probs=parallel_params_probs
-            ),
-            value=value
-        )
+            # Create the AASNetwork estimation
+            aas_estimation = AASNetworkEstimation(
+                policy=AASNetworkPolicyEstimation(
+                    select_probs=select_logits.softmax(dim=0),
+                    parallel_params_probs=parallel_params_logits.softmax(dim=1)
+                ),
+                value=value
+            )
         # Return the action probabilities
         return aas_estimation
 
@@ -329,16 +336,16 @@ class AASNetworkWrapper:
             # Set model to evaluation mode
             self.model.eval()
             # Make prediction
-            select_probs, parallel_params_probs = self.model.eval_policy(node.state.to_tensor().unsqueeze(0))
-            select_probs = select_probs.squeeze(0)
-            parallel_params_probs = parallel_params_probs.squeeze(0)
+            select_logits, parallel_params_logits = self.model.eval_policy(node.state.to_tensor().unsqueeze(0))
+            select_logits = select_logits.squeeze(0)
+            parallel_params_logits = parallel_params_logits.squeeze(0)
             # Set model back to training mode
             self.model.train()
-        # Create the AASNetwork policy estimation
-        aas_policy_estimation = AASNetworkPolicyEstimation(
-            select_probs=select_probs,
-            parallel_params_probs=parallel_params_probs
-        )
+            # Create the AASNetwork policy estimation
+            aas_policy_estimation = AASNetworkPolicyEstimation(
+                select_probs=select_logits.softmax(dim=0),
+                parallel_params_probs=parallel_params_logits.softmax(dim=1)
+            )
         # Return the action probabilities
         return aas_policy_estimation
 
@@ -377,9 +384,9 @@ class AASNetworkWrapper:
             # Set model to evaluation mode
             self.model.eval()
             # Make prediction
-            select_probs, parallel_params_probs, value = self.model(state.to_tensor().unsqueeze(0))
-            select_probs = select_probs.squeeze(0)
-            parallel_params_probs = parallel_params_probs.squeeze(0)
+            select_logits, parallel_params_logits, value = self.model(state.to_tensor().unsqueeze(0))
+            select_probs = select_logits.squeeze(0).softmax(dim=0)
+            parallel_params_probs = parallel_params_logits.squeeze(0).softmax(dim=1)
             value = value.squeeze(0)
             # Set model back to training mode
             self.model.train()

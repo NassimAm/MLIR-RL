@@ -39,15 +39,9 @@ class AASNetwork(torch.nn.Module):
         )
         # Define the output layers of the policy network
         self.select_network_dim = cfg.num_transformations
-        self.select_network = nn.Sequential(
-            nn.Linear(512, self.select_network_dim),
-            nn.Softmax(dim=1)
-        )
+        self.select_network = nn.Linear(512, self.select_network_dim)
         self.parallel_params_network_dim = cfg.max_num_loops * (cfg.num_tile_sizes + 1)
-        self.parallel_params_networks = [nn.Sequential(
-            nn.Linear(512, cfg.num_tile_sizes + 1),
-            nn.Softmax(dim=1)
-        ) for _ in range(cfg.max_num_loops)]
+        self.parallel_params_networks = [nn.Linear(512, cfg.num_tile_sizes + 1) for _ in range(cfg.max_num_loops)]
         # Define the output layers of the value network
         self.value_output_dim = 1
         self.value_network = nn.Sequential(
@@ -63,17 +57,17 @@ class AASNetwork(torch.nn.Module):
     def forward(self, obs: torch.Tensor):
         """Forward pass of the AAS network."""
         x = self.backbone(obs)
-        select_probs = self.select_network(x)
-        parallel_params_probs = torch.concatenate([parallel_params_network(x).unsqueeze(1) for parallel_params_network in self.parallel_params_networks], dim=1)
+        select_logits = self.select_network(x)
+        parallel_params_logits = torch.concatenate([parallel_params_network(x).unsqueeze(1) for parallel_params_network in self.parallel_params_networks], dim=1)
         value = self.value_network(obs)
-        return select_probs, parallel_params_probs, value.squeeze(-1)
+        return select_logits, parallel_params_logits, value.squeeze(-1)
 
     def eval_policy(self, obs: torch.Tensor):
         """Evaluate the policy network."""
         x = self.backbone(obs)
-        select_probs = self.select_network(x)
-        parallel_params_probs = torch.concatenate([parallel_params_network(x).unsqueeze(1) for parallel_params_network in self.parallel_params_networks], dim=1)
-        return select_probs, parallel_params_probs
+        select_logits = self.select_network(x)
+        parallel_params_logits = torch.concatenate([parallel_params_network(x).unsqueeze(1) for parallel_params_network in self.parallel_params_networks], dim=1)
+        return select_logits, parallel_params_logits
 
     def eval_value(self, obs: torch.Tensor):
         """Evaluate the value network."""
