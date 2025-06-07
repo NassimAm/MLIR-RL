@@ -379,6 +379,8 @@ class AASTrainer:
                 self.file_logger.extend('train/value_loss', train_stats.value_loss)
                 for j in range(cfg.max_num_loops):
                     self.file_logger.extend(f'train/parallel_params_loss_{j}', train_stats.parallel_params_loss[j])
+                self.file_logger.extend('train/selection_entropy', train_stats.selection_entropy)
+                self.file_logger.extend('train/parallel_entropy', train_stats.parallel_params_entropy)
             train_end_time = time.time()
             train_duration = train_end_time - train_start_time
             if cfg.logging:

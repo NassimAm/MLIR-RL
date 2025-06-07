@@ -140,7 +140,7 @@ class Parallelization(ParameterizedAction):
                 # We take the divisors of the upperbound
                 sub_candidates = [0]
                 i = 1
-                while i <= nested_loop.upper_bound and len(sub_candidates) < cfg.num_tile_sizes:
+                while i <= nested_loop.upper_bound and len(sub_candidates) < cfg.num_tile_sizes + 1:
                     if nested_loop.upper_bound % i == 0:
                         sub_candidates.append(i)
                     i *= 2
@@ -293,7 +293,7 @@ class Tiling(ParameterizedAction):
                 # We take the divisors of the upperbound
                 sub_candidates = [0]
                 i = 1
-                while i <= nested_loop.upper_bound and len(sub_candidates) < cfg.num_tile_sizes:
+                while i <= nested_loop.upper_bound and len(sub_candidates) < cfg.num_tile_sizes + 1:
                     if nested_loop.upper_bound % i == 0:
                         sub_candidates.append(i)
                     i *= 2

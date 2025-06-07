@@ -127,6 +127,10 @@ class AASNetworkManagerStats:
     """The parallelization parameters loss history."""
     value_loss: list[float]
     """The value loss history."""
+    selection_entropy: list[float]
+    """The selection entropy history."""
+    parallel_params_entropy: list[float]
+    """The parallelization parameters entropy history."""
 
     def __init__(self):
         """Initialize the AlphaAutoScheduler stats."""
@@ -227,12 +231,16 @@ class AASNetworkWrapper:
                 sl = torch.mean(self.ce_loss(select_probs_logits, select_probs_target_batch) * policy_mask_batch)
                 ppls = torch.concatenate([torch.mean(self.ce_loss(parallel_params_probs_logits[:, i, :], parallel_params_probs_target_batch[:, i, :]) * parallel_params_mask_batch[:, i]).unsqueeze(0) for i in range(cfg.max_num_loops)])
                 vl = self.value_loss(value_pred, value_target_batch)
+                sl_entropy = torch.mean(torch.sum(-select_probs_logits.softmax(dim=1) * select_probs_logits.softmax(dim=1).log(), dim=1) * policy_mask_batch)
+                ppls_entropy = torch.mean(torch.sum(-parallel_params_probs_logits.softmax(dim=2) * parallel_params_probs_logits.softmax(dim=2).log(), dim=2) * parallel_params_mask_batch)
                 # Save losses for stats
                 if cfg.logging:
                     self.stats.selection_loss.append(sl.item())
                     for i in range(cfg.max_num_loops):
                         self.stats.parallel_params_loss[i].append(ppls[i].item())
                     self.stats.value_loss.append(vl.item())
+                    self.stats.selection_entropy.append(sl_entropy.item())
+                    self.stats.parallel_params_entropy.append(ppls_entropy.item())
                 # Backward pass
                 loss = sl + torch.sum(ppls) + vl
                 loss.backward()
@@ -414,11 +422,13 @@ class AASNetworkWrapper:
         if parallelization_applied:
             parallel_params_probs[:, :] = 0.0
             parallel_params_probs[:, 0] = 1.0
-        else:  # Otherwise, mask parallelization parameters that don't divide the loop size
-            for i, loop in enumerate(op_features.nested_loops):
+        else:  # Otherwise, mask parallelization parameters that are not candidates
+            candidates = Parallelization.get_tiling_candidates(op_features)
+            nb_loops = len(op_features.nested_loops)
+            for i in range(nb_loops):
                 for j in range(cfg.num_tile_sizes + 1):
                     tile_size = Parallelization.get_tile_size(j)
-                    if tile_size > 0 and loop.upper_bound % tile_size != 0:
+                    if tile_size not in candidates[i]:
                         parallel_params_probs[i, j] = 0.0
                 # Normalize the probabilities
                 loop_probs_sum = parallel_params_probs[i].sum()
@@ -427,7 +437,6 @@ class AASNetworkWrapper:
                 else:
                     parallel_params_probs[i, 0] = 1.0
             # Mask parallelization parameters for loops that are not present in the operation
-            nb_loops = len(op_features.nested_loops)
             parallel_params_probs[nb_loops:, :] = 0.0
             parallel_params_probs[nb_loops:, 0] = 1.0
         # Normalize selection probabilities
@@ -487,9 +496,9 @@ class AASNetworkWrapper:
                     # Calculate parallelization selection probability
                     parallel_prob += child_p
                     # For parallelization, the marginal probability is calculated instead of using MCTS joint probability over tiling sizes
-                    for i, param in enumerate(child_action.params):
+                    for j, param in enumerate(child_action.params):
                         param_idx = Parallelization.get_param_id(param)
-                        parallel_params_probs[i, param_idx] += child_p
+                        parallel_params_probs[j, param_idx] += child_p
                 elif isinstance(child_action, Vectorization):
                     select_probs[Vectorization.ID] = child_p
                 elif isinstance(child_action, NoTransformation):

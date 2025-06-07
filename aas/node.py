@@ -136,7 +136,7 @@ class Node:
                 nb_combinations *= len(sub_candidates)
             # Generate tiling combinations
             combinations = []
-            if cfg.mcts_max_num_tile_combinations < 0:
+            if cfg.mcts_max_nb_children < 0:
                 # Get all possible tiling combinations
                 combinations = Parallelization.generate_tiling_combinations(candidates)
                 # # Shuffle the combinations for more randomness (encourages exploration)
@@ -144,7 +144,7 @@ class Node:
             else:
                 # Get a random subset of possible tiling combinations
                 seen_combination_ids = set()
-                for _ in min(nb_combinations, cfg.mcts_max_num_tile_combinations):
+                for _ in min(nb_combinations, cfg.mcts_max_nb_children):
                     combination_id = random.randint(0, nb_combinations - 1)
                     while combination_id in seen_combination_ids:
                         combination_id = random.randint(0, nb_combinations - 1)

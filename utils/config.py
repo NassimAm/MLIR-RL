@@ -177,16 +177,12 @@ class AASConfig(metaclass=Singleton):
     enable_hierarchical_space: bool
     """Flag to enable hierarchical space for actions"""
     # MCTS configuration ============================================
-    mcts_max_num_tile_combinations: int
+    mcts_max_nb_children: int
     """The maximum number of tile combinations to consider in MCTS. If -1, all combinations are considered."""
     mcts_nb_iterations: int
     """The number of MCTS iterations"""
-    mcts_estimation_mode: Literal['VEMS', 'VEAS']
-    """The estimation mode for MCTS"""
     mcts_c_puct: float
     """The PUCT constant for MCTS"""
-    mcts_expansion_mode: Literal['old', 'new']
-    """The expansion mode for MCTS"""
     # MLIR code features configuration ==============================
     max_num_stores_loads: int
     """The maximum number of loads in the nested loops"""
@@ -238,10 +234,9 @@ class AASConfig(metaclass=Singleton):
         self.learning_rate = 0.001
         self.l2_reg = 0.0001
         self.pitting = True
-        self.mcts_max_num_tile_combinations = -1
+        self.mcts_max_nb_children = -1
         self.mcts_nb_iterations = 1000
         self.mcts_c_puct = 1.0
-        self.mcts_expansion_mode = "old"
         self.max_num_stores_loads = 7
         self.max_num_loops = 7
         self.max_num_load_store_dim = 7
@@ -282,10 +277,9 @@ class AASConfig(metaclass=Singleton):
         self.learning_rate = config["learning_rate"]
         self.l2_reg = config["l2_reg"]
         self.pitting = config["pitting"]
-        self.mcts_max_num_tile_combinations = config["mcts_max_num_tile_combinations"]
+        self.mcts_max_nb_children = config["mcts_max_nb_children"]
         self.mcts_nb_iterations = config["mcts_nb_iterations"]
         self.mcts_c_puct = config["mcts_c_puct"]
-        self.mcts_expansion_mode = config["mcts_expansion_mode"]
         self.max_num_stores_loads = config["max_num_stores_loads"]
         self.max_num_loops = config["max_num_loops"]
         self.max_num_load_store_dim = config["max_num_load_store_dim"]
@@ -303,7 +297,6 @@ class AASConfig(metaclass=Singleton):
         self.tags = config["tags"]
         self.logging = config["logging"]
         # Check the configuration values
-        assert self.mcts_expansion_mode in ["old", "new"], "Invalid MCTS expansion mode. Should be 'old' or 'new'."
         assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
         assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
         assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
@@ -324,10 +317,9 @@ class AASConfig(metaclass=Singleton):
             "learning_rate": self.learning_rate,
             "l2_reg": self.l2_reg,
             "pitting": self.pitting,
-            "mcts_max_num_tile_combinations": self.mcts_max_num_tile_combinations,
+            "mcts_max_nb_children": self.mcts_max_nb_children,
             "mcts_nb_iterations": self.mcts_nb_iterations,
             "mcts_c_puct": self.mcts_c_puct,
-            "mcts_expansion_mode": self.mcts_expansion_mode,
             "max_num_stores_loads": self.max_num_stores_loads,
             "max_num_loops": self.max_num_loops,
             "max_num_load_store_dim": self.max_num_load_store_dim,

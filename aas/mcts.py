@@ -73,25 +73,21 @@ class MCTS:
             node (Node): The node to expand.
             exec_db (Optional[dict], optional): The benchmark execution database to use for the speedup values. Defaults to None.
         """
-        if cfg.mcts_expansion_mode == 'old':
-            # Evaluate the node
-            aas_estimation = self.aas_network_wrapper.eval_node(node)
-            aas_estimation_policy = aas_estimation.policy
-            # Get the node value
-            real_exec_time = get_cached_exec_time(exec_db, node.state)
-            if real_exec_time is not None:
-                # Use the real speedup if available to get the value
-                node_value = self.reward_func(node.state, real_exec_time)
-            else:
-                # Otherwise, use the AAS network estimation to get the value
-                node_value = aas_estimation.get_value().item()
-            # Update the node with its value
-            node.update_leaf(node_value)
-            self.min_value = min(self.min_value, node_value)
-            self.max_value = max(self.max_value, node_value)
+        # Evaluate the node
+        aas_estimation = self.aas_network_wrapper.eval_node(node)
+        aas_estimation_policy = aas_estimation.policy
+        # Get the node value
+        real_exec_time = get_cached_exec_time(exec_db, node.state)
+        if real_exec_time is not None:
+            # Use the real speedup if available to get the value
+            node_value = self.reward_func(node.state, real_exec_time)
         else:
-            # Evaluate the node policy
-            aas_estimation_policy = self.aas_network_wrapper.eval_node_policy(node)
+            # Otherwise, use the AAS network estimation to get the value
+            node_value = aas_estimation.get_value().item()
+        # Update the node with its value
+        node.update_leaf(node_value)
+        self.min_value = min(self.min_value, node_value)
+        self.max_value = max(self.max_value, node_value)
         # Get available actions
         available_actions = node.get_available_actions()
         sum_child_node_factors = 0.0
@@ -107,19 +103,6 @@ class MCTS:
         for child in node.children:
             # Normalize the child node exploration factor
             child.node_exploration_factor /= sum_child_node_factors
-            if cfg.mcts_expansion_mode == 'new':
-                # Get the child node value
-                real_exec_time = get_cached_exec_time(exec_db, child.state)
-                if real_exec_time is not None:
-                    # Use the real speedup if available to get the value
-                    child_value = self.reward_func(child.state, real_exec_time)
-                else:
-                    # Otherwise, use the AAS network estimation to get the value
-                    child_value = self.aas_network_wrapper.eval_node_value(child)
-                # Update the child node with its value
-                child.update_leaf(child_value)
-                self.min_value = min(self.min_value, child_value)
-                self.max_value = max(self.max_value, child_value)
 
     def backpropagate(self, node: Node):
         """Backpropagate the speedup value up the MCTS tree.
