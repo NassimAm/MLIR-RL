@@ -5,3 +5,5 @@ tools/*/build
 data/lqcd/bench
 *.ipynb
 saves/
+data/*
+report

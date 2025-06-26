@@ -38,6 +38,7 @@
 #include <optional>
 #include "mlir/Dialect/Transform/Interfaces/TransformInterfaces.h"
 #include "mlir/Dialect/Linalg/TransformOps/LinalgTransformOps.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/MLIRContext.h"
@@ -150,6 +151,13 @@ int main(int argc, char **argv)
       // printer << linalgOp; std::cout << "\n";
       llvm::outs() << linalgOp << "\n";
 
+      llvm::outs() << "#START_VECTORIZABLE" << "\n";
+      if (failed(linalg::vectorizeOpPrecondition(linalgOp))) {
+        llvm::outs() << "false" << "\n";
+      } else {
+        llvm::outs() << "true" << "\n";
+      }
+
       llvm::outs() << "#START_NESTED_LOOPS" << "\n";
       llvm::SmallVector<int64_t, 4U> loop_ranges = linalgOp.getStaticLoopRanges();
       llvm::SmallVector<utils::IteratorType> iterator_types = linalgOp.getIteratorTypesArray();
@@ -174,6 +182,23 @@ int main(int argc, char **argv)
       }
       for (BlockArgument used_operand : used_operands) {
         AffineMap operand_map = linalgOp.getMatchingIndexingMap(linalgOp.getMatchingOpOperand(used_operand));
+        uint results_nbr = operand_map.getNumResults();
+        for (auto [index, map_result] : llvm::enumerate(operand_map.getResults())) {
+          map_result.print(llvm::outs());
+          if (index < results_nbr - 1) {
+            llvm::outs() << ", ";
+          } else {
+            llvm::outs() << "\n";
+          }
+        }
+      }
+      llvm::outs() << "#START_STORE_DATA" << "\n";
+      size_t out_args_nbr = linalgOp.getRegionOutputArgs().size();
+      if (out_args_nbr > 1) {
+        throw std::runtime_error("Multiple output arguments are not supported.");
+      }
+      for (BlockArgument out_arg : linalgOp.getRegionOutputArgs()) {
+        AffineMap operand_map = linalgOp.getMatchingIndexingMap(linalgOp.getMatchingOpOperand(out_arg));
         uint results_nbr = operand_map.getNumResults();
         for (auto [index, map_result] : llvm::enumerate(operand_map.getResults())) {
           map_result.print(llvm::outs());

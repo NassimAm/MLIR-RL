@@ -198,6 +198,8 @@ class AASConfig(metaclass=Singleton):
     """The list of transformations to consider"""
     vect_size_limit: int
     """Vectorization size limit to prevent large sizes vectorization"""
+    parallelize_reduction: bool
+    """Flag to enable parallelizing reduction operations"""
     # Data and execution configuration ==============================
     use_bindings: bool
     """Flag to enable using python bindings for execution, if False, the execution will be done using the command line. Default is False."""
@@ -211,6 +213,10 @@ class AASConfig(metaclass=Singleton):
     """Path to the benchmarks folder. Can be empty if optimization mode is set to "last"."""
     json_file: str
     """Path to the JSON file containing the benchmarks code or features."""
+    eval_json_file: str
+    """Path to the JSON file containing the evaluation benchmarks code or features."""
+    split_ops: bool
+    """Flag to enable splitting benchmarks that have more than one operation into multiple single operation benchmarks."""
     exec_db_path: str
     """Path to the execution database file."""
     # Neptune configuration =========================================
@@ -218,6 +224,8 @@ class AASConfig(metaclass=Singleton):
     """List of tags to add to the neptune experiment"""
     logging: bool
     """Flag to enable logging to neptune"""
+    debug: bool
+    """Flag to enable debug mode"""
 
     loaded: bool
     """Flag to check if the config was already loaded from JSON file or not"""
@@ -244,6 +252,7 @@ class AASConfig(metaclass=Singleton):
         self.num_transformations = 3
         self.transformations = ["I", "TP", "V"]
         self.vect_size_limit = 512
+        self.parallelize_reduction = False
         self.use_bindings = False
         self.use_vectorizer = False
         self.data_format = "json"
@@ -251,9 +260,12 @@ class AASConfig(metaclass=Singleton):
         self.benchmarks_folder_path = ""
         self.exec_db_path = ""
         self.json_file = ""
+        self.eval_json_file = ""
+        self.split_ops = True
         self.tags = []
         self.logging = True
         self.loaded = False
+        self.debug = False
 
     def load_from_json(self, path: Optional[str] = None):
         """Load the configuration from the JSON file.
@@ -287,15 +299,19 @@ class AASConfig(metaclass=Singleton):
         self.num_transformations = config["num_transformations"]
         self.transformations = config["transformations"]
         self.vect_size_limit = config["vect_size_limit"]
+        self.parallelize_reduction = config["parallelize_reduction"]
         self.use_bindings = config["use_bindings"]
         self.use_vectorizer = config["use_vectorizer"]
         self.data_format = config["data_format"]
         self.optimization_mode = config["optimization_mode"]
         self.benchmarks_folder_path = config["benchmarks_folder_path"]
         self.json_file = config["json_file"]
+        self.eval_json_file = config["eval_json_file"]
+        self.split_ops = config["split_ops"]
         self.exec_db_path = config["exec_db_path"]
         self.tags = config["tags"]
         self.logging = config["logging"]
+        self.debug = config["debug"]
         # Check the configuration values
         assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
         assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
@@ -327,15 +343,19 @@ class AASConfig(metaclass=Singleton):
             "num_transformations": self.num_transformations,
             "transformations": self.transformations,
             "vect_size_limit": self.vect_size_limit,
+            "parallelize_reduction": self.parallelize_reduction,
             "use_bindings": self.use_bindings,
             "use_vectorizer": self.use_vectorizer,
             "data_format": self.data_format,
             "optimization_mode": self.optimization_mode,
             "benchmarks_folder_path": self.benchmarks_folder_path,
             "json_file": self.json_file,
+            "eval_json_file": self.eval_json_file,
+            "split_ops": self.split_ops,
             "exec_db_path": self.exec_db_path,
             "tags": self.tags,
-            "logging": self.logging
+            "logging": self.logging,
+            "debug": self.debug
         }
 
     def __str__(self):

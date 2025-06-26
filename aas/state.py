@@ -40,7 +40,7 @@ class OperationState:
         LSD = cfg.max_num_load_store_dim
         TS = cfg.num_tile_sizes
         NT = cfg.num_transformations
-        return 6 + 5 + 1 + L * 2 + SL * LSD * L + LSD * L + NT + L * (TS + 1)
+        return 6 + 5 + 1 + 1 + L * 2 + SL * LSD * L + LSD * L + NT + L * (TS + 1)
 
     def to_tensor(self):
         """Convert the operation state to a torch tensor.
@@ -73,6 +73,9 @@ class OperationState:
             op_iter_space_size = torch.tensor([self.operation_features.op_iter_space_size])
             if cfg.normalize_features:
                 op_iter_space_size = torch.log2(op_iter_space_size)
+
+            # Vectorizable (size = 1)
+            vectorizable = torch.tensor([1 if self.operation_features.vectorizable else 0])
 
             # Nested loop features: (upper bound, iter type) (size = max_num_loops * 2)
             indices = [nested_loop.arg for nested_loop in self.operation_features.nested_loops]
@@ -129,6 +132,7 @@ class OperationState:
                 operation_type_ohe,
                 operations_count,
                 op_iter_space_size,
+                vectorizable,
                 nested_loops,
                 load_access_matrices,
                 store_access_matrices,

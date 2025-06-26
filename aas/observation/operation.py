@@ -42,6 +42,8 @@ class OperationFeatures:
     """List of load accesses where each load is represented by the list of access arguments."""
     store_data: list[list[str]]
     """List of store accesses where each store is represented by the list of access arguments."""
+    vectorizable: bool = True
+    """Whether the operation is vectorizable or not. Defaults to True."""
 
     def __repr__(self):
         return f"OperationFeatures(operation_type={self.operation_type}, op_count={self.op_count}, op_iter_space_size={self.op_iter_space_size}, nested_loops={self.nested_loops}, load_data={self.load_data}, store_data={self.store_data})"
@@ -281,6 +283,29 @@ def get_ops_by_tags(code: str, operation_tags: list, tmp_file_path: str):
     return res
 
 
+def get_operation_type(raw_operation: str) -> Optional[str]:
+    """Get the operation type from the raw operation string.
+
+    Args:
+        raw_operation (str): The raw operation string.
+
+    Returns:
+        str: The operation type.
+    """
+    if 'linalg.matmul' in raw_operation:
+        return 'matmul'
+    elif 'linalg.conv' in raw_operation:
+        return 'conv_2d'
+    elif 'pooling' in raw_operation:
+        return 'pooling'
+    elif 'linalg.add' in raw_operation:
+        return 'add'
+    elif 'linalg.generic' in raw_operation:
+        return 'generic'
+    else:
+        return None
+
+
 # ================================================ Private functions ================================================
 
 def __extract_op_features_from_ast_result(raw_ast_info: str, operation_tag: str):
@@ -312,29 +337,20 @@ def __extract_op_features_from_ast_result(raw_ast_info: str, operation_tag: str)
         return None
 
     operation_block = operations_blocks[operation_block_id]
+
+    raw_operation, rest = operation_block.split("#START_VECTORIZABLE")
+    operation_type = get_operation_type(raw_operation)
+
     nested_loops = []
     op_count = {}
-    load_data = []
-    store_data = []
+    load_data: list[list[str]] = []
+    store_data: list[str] = []
 
-    raw_operation, rest = operation_block.split("#START_NESTED_LOOPS")
-
-    if 'linalg.matmul' in raw_operation:
-        operation_type = 'matmul'
-    elif 'linalg.conv' in raw_operation:
-        operation_type = 'conv_2d'
-    elif 'pooling' in raw_operation:
-        operation_type = 'pooling'
-    elif 'linalg.add' in raw_operation:
-        operation_type = 'add'
-    elif 'linalg.generic' in raw_operation:
-        operation_type = 'generic'
-    else:
-        operation_type = 'unknown'
+    vectorizable_str, rest = rest.split("#START_NESTED_LOOPS")
+    assert vectorizable_str.strip() in ["true", "false"], f"Vectorizable string is not valid: {vectorizable_str}"
+    vectorizable = vectorizable_str.strip() == "true"
 
     nested_loops_str, rest = rest.split("#START_LOAD_DATA")
-    loop_args = []
-
     op_iter_space_size = 1
     for nested_loop_str in nested_loops_str.strip().split("\n"):
         if not nested_loop_str:
@@ -347,30 +363,36 @@ def __extract_op_features_from_ast_result(raw_ast_info: str, operation_tag: str)
             step=int(step),
             iterator_type=iter
         )
-        nested_loops.append(nested_loop)
-        loop_args.append(arg)
         op_iter_space_size *= nested_loop.upper_bound - nested_loop.lower_bound
+        nested_loops.append(nested_loop)
 
-    loads_data_str, rest = rest.split("#START_OP_COUNT")
-    for loop_arg in loop_args:
-        loads_data_str = loads_data_str.replace(loop_arg, f'%{loop_arg}')
+    loads_data_str, rest = rest.split("#START_STORE_DATA")
+    loads_data_str = re.sub(r'd\d+', lambda m: f'%{m.group()}', loads_data_str)
     for load_data_str in loads_data_str.strip().split("\n"):
         if not load_data_str:
             continue
         load_data.append(load_data_str.split(", "))
 
-    ops_count_str, _ = rest.split("#START_TAG")
+    store_data_str, rest = rest.split("#START_OP_COUNT")
+    store_data_str = re.sub(r'd\d+', lambda m: f'%{m.group()}', store_data_str)
+    store_data_list = store_data_str.strip().split("\n")
+    assert len(store_data_list) == 1, f"Store data list is not of length 1: {store_data_list}"
+    store_data = store_data_list[0].split(", ")
+
+    ops_count_str, rest = rest.split("#START_TAG")
     for op_count_str in ops_count_str.strip().split("\n"):
         op, count = op_count_str.strip().split(" ")
         op_count[op] = int(count)
 
+    operation_tag = rest.strip().split("\n")[0]
     return OperationFeatures(
         operation_type=operation_type,
         op_count=op_count,
         op_iter_space_size=op_iter_space_size,
         nested_loops=nested_loops,
         load_data=load_data,
-        store_data=store_data
+        store_data=store_data,
+        vectorizable=vectorizable
     )
 
 

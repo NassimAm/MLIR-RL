@@ -127,10 +127,6 @@ class AASNetworkManagerStats:
     """The parallelization parameters loss history."""
     value_loss: list[float]
     """The value loss history."""
-    selection_entropy: list[float]
-    """The selection entropy history."""
-    parallel_params_entropy: list[float]
-    """The parallelization parameters entropy history."""
 
     def __init__(self):
         """Initialize the AlphaAutoScheduler stats."""
@@ -231,16 +227,12 @@ class AASNetworkWrapper:
                 sl = torch.mean(self.ce_loss(select_probs_logits, select_probs_target_batch) * policy_mask_batch)
                 ppls = torch.concatenate([torch.mean(self.ce_loss(parallel_params_probs_logits[:, i, :], parallel_params_probs_target_batch[:, i, :]) * parallel_params_mask_batch[:, i]).unsqueeze(0) for i in range(cfg.max_num_loops)])
                 vl = self.value_loss(value_pred, value_target_batch)
-                sl_entropy = torch.mean(torch.sum(-select_probs_logits.softmax(dim=1) * select_probs_logits.softmax(dim=1).log(), dim=1) * policy_mask_batch)
-                ppls_entropy = torch.mean(torch.sum(-parallel_params_probs_logits.softmax(dim=2) * parallel_params_probs_logits.softmax(dim=2).log(), dim=2) * parallel_params_mask_batch)
                 # Save losses for stats
                 if cfg.logging:
                     self.stats.selection_loss.append(sl.item())
                     for i in range(cfg.max_num_loops):
                         self.stats.parallel_params_loss[i].append(ppls[i].item())
                     self.stats.value_loss.append(vl.item())
-                    self.stats.selection_entropy.append(sl_entropy.item())
-                    self.stats.parallel_params_entropy.append(ppls_entropy.item())
                 # Backward pass
                 loss = sl + torch.sum(ppls) + vl
                 loss.backward()

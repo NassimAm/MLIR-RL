@@ -166,7 +166,8 @@ class Parallelization(ParameterizedAction):
             op_iter_space_size=op_iter_space_size,
             nested_loops=operation_features.nested_loops,
             load_data=operation_features.load_data,
-            store_data=operation_features.store_data
+            store_data=operation_features.store_data,
+            vectorizable=operation_features.vectorizable
         )
 
 
@@ -183,7 +184,7 @@ class Vectorization(Action):
         super().__init__(Vectorization.ID, Vectorization.DEFAULT_NAME)
 
     def is_possible(operation_features: OperationFeatures):
-        return operation_features.op_iter_space_size <= cfg.vect_size_limit
+        return operation_features.vectorizable and (operation_features.op_iter_space_size <= cfg.vect_size_limit)
 
 
 class NoTransformation(Action):
@@ -319,5 +320,6 @@ class Tiling(ParameterizedAction):
             op_iter_space_size=op_iter_space_size,
             nested_loops=operation_features.nested_loops,
             load_data=operation_features.load_data,
-            store_data=operation_features.store_data
+            store_data=operation_features.store_data,
+            vectorizable=operation_features.vectorizable
         )

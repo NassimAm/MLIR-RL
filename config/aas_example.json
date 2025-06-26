@@ -19,6 +19,7 @@
     "num_transformations": 3,
     "transformations": ["I", "TP", "V"],
     "vect_size_limit": 2048,
+    "parallelize_reduction": false,
     "use_bindings": false,
     "use_vectorizer": false,
     "data_format": "json",

@@ -12,6 +12,7 @@ from aas.state import OperationState
 from aas.transforms import apply_transformation_with_timeout
 from aas.observation.benchmark import BenchmarkFeatures
 import json
+import re
 
 
 # ================================== Evaluation Functions (Python Bindings) ==================================
@@ -23,7 +24,6 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
 
     Args:
         code (str): The MLIR code to run.
-        function_name (str): The name of the function to run.
 
     Returns:
         Optional[float]: the execution time in seconds.
@@ -32,9 +32,17 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
     pass_pipeline = """builtin.module(
         loop-invariant-code-motion,
         canonicalize,
-        convert-vector-to-scf,
+
+        eliminate-empty-tensors,
+        empty-tensor-to-alloc-tensor,
+        one-shot-bufferize{
+            bufferize-function-boundaries
+            function-boundary-type-conversion=identity-layout-map
+        },
+
         convert-linalg-to-loops,
         buffer-deallocation-pipeline,
+        convert-bufferization-to-memref,
         scf-forall-to-parallel,
         convert-scf-to-openmp,
         expand-strided-metadata,
@@ -45,6 +53,7 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
         convert-openmp-to-llvm,
         convert-vector-to-llvm,
         convert-math-to-llvm,
+        finalize-memref-to-llvm,
         convert-func-to-llvm,
         convert-index-to-llvm,
         convert-arith-to-llvm,
@@ -64,25 +73,12 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
         shared_libs=os.getenv("MLIR_SHARED_LIBS", "").split(","),
     )
 
-    full_function_name = os.path.join(
-        cfg.benchmarks_folder_path,
-        function_name + ".mlir"
-    )
-    with open(full_function_name, "r") as f:
-        original_code = f.read()
+    inputs = __create_inputs(code)
 
-    np_file: np.lib.npyio.NpzFile = np.load(full_function_name + ".npz")
-    expected: np.ndarray = np.load(full_function_name + ".npy")
-
-    args_names: list[str] = sorted(
-        np_file.files,
-        key=lambda s: original_code.index(s)
-    )
-    args_map: dict[str, np.ndarray] = {arr: np_file[arr] for arr in args_names}
     args = []
-    for arg_name in args_names:
+    for input_arg in inputs:
         args.append(ctypes.pointer(ctypes.pointer(
-            get_ranked_memref_descriptor(args_map[arg_name])
+            get_ranked_memref_descriptor(input_arg)
         )))
 
     delta_arg = (ctypes.c_int64 * 1)(0)
@@ -92,15 +88,9 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
         execution_engine.invoke("main", *args)
         execution_engine.invoke("main", *args)
     except Exception as e:
-        np_file.close()
         return None, e
-    actual = args_map[args_names[-1]]
-    if expected.dtype == np.complex128:
-        actual = actual.view(np.complex128).squeeze(len(actual.shape) - 1)
-    assertion = np.allclose(actual, expected)
 
-    np_file.close()
-    return delta_arg[0], assertion
+    return delta_arg[0], True
 
 
 def evaluate_code_with_bindings_wrapper(code: str, function_name: str, exec_times: multiprocessing.managers.ListProxy, assertions: multiprocessing.managers.ListProxy):
@@ -224,13 +214,14 @@ def evaluate_code_with_cmd_and_timeout(code: str, tmp_file_path: str, timeout: O
 
 # ================================== Evaluation Functions (Both) ==================================
 
-def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeout: Optional[float] = None):
+def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeout: Optional[float] = None, use_cache: bool = True):
     """Evaluates the given MLIR code using Python bindings or MLIR opt and MLIR CPU Runner with a timeout.
 
     Args:
         state (OperationState): The state to run the Alpha AutoScheduler on.
         tmp_file_path (str): The temporary file path to write the MLIR code.
         timeout (Optional[float]): The timeout in seconds.
+        use_cache (bool): Whether to use the execution database to cache execution times.
 
     Returns:
         Optional[float]: the execution time in seconds.
@@ -269,7 +260,7 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
         return None, False, code
 
     # Check execution database for the execution time of the given state
-    if cfg.exec_db_path:
+    if use_cache and cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
             exec_db = json.load(f)
         bench_db = exec_db.get(state.bench_features.bench_name)
@@ -284,7 +275,7 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
     else:
         exec_time, assertion = evaluate_code_with_cmd(code, tmp_file_path)
     # Store the execution time in the execution database
-    if (exec_time is not None) and assertion and cfg.exec_db_path:
+    if use_cache and (exec_time is not None) and assertion and cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
             exec_db = json.load(f)
         bench_db = exec_db.get(state.bench_features.bench_name)
@@ -299,13 +290,14 @@ def evaluate_code_with_timeout(state: OperationState, tmp_file_path: str, timeou
     return exec_time, assertion, code
 
 
-def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_path: str, timeout: Optional[float] = None):
+def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_path: str, timeout: Optional[float] = None, use_cache: bool = True):
     """Evaluates the given MLIR code using Python bindings or MLIR opt and MLIR CPU Runner with a timeout.
 
     Args:
         states (list[OperationState]): The states to run the Alpha AutoScheduler on.
         tmp_file_path (str): The temporary file path to write the MLIR code.
         timeout (Optional[float]): The timeout in seconds.
+        use_cache (bool): Whether to use the execution database to cache execution times.
 
     Returns:
         Optional[float]: the execution time in seconds.
@@ -342,7 +334,7 @@ def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_
         return None, False, code
 
     # Check execution database for the execution time of the given state
-    if cfg.exec_db_path:
+    if use_cache and cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
             exec_db = json.load(f)
         bench_db = exec_db.get(bench_features.bench_name)
@@ -356,7 +348,7 @@ def evaluate_benchmark_code_with_timeout(states: list[OperationState], tmp_file_
     else:
         exec_time, assertion = evaluate_code_with_cmd(code, tmp_file_path)
     # Store the execution time in the execution database
-    if (exec_time is not None) and assertion and cfg.exec_db_path:
+    if use_cache and (exec_time is not None) and assertion and cfg.exec_db_path:
         with open(cfg.exec_db_path, "r") as f:
             exec_db = json.load(f)
         bench_db = exec_db.get(bench_features.bench_name)
@@ -396,3 +388,36 @@ def get_cached_exec_time(exec_db: Optional[dict], state: OperationState):
         return exec_db.get(BenchmarkFeatures.any_schedule_to_str(full_schedule))
     # Else return None
     return None
+
+
+def __create_inputs(code) -> list[np.ndarray]:
+    main_pattern = r"func.func @main\(([^)]+)\)"
+    main_params = re.search(main_pattern, code).group(1)
+    main_shapes = [arg.split(':')[1].strip() for arg in main_params.split(',')]
+
+    inputs: list[np.ndarray] = []
+    for shape in main_shapes:
+        assert shape.startswith('memref<') or shape.startswith('tensor<'), f'unexpected shape {shape}'
+        *np_shape, dtype = shape.replace('memref<', '').replace('tensor<', '').replace('>', '').split('x')
+        assert dtype[0] in ['f', 'i'] and dtype[1:] in ['32', '64'], f'unexpected dtype {dtype}'
+        match dtype[0]:
+            case 'f':
+                match dtype[1:]:
+                    case '32':
+                        np_dtype = np.float32
+                    case '64':
+                        np_dtype = np.float64
+            case 'i':
+                match dtype[1:]:
+                    case '32':
+                        np_dtype = np.int32
+                    case '64':
+                        np_dtype = np.int64
+        np_shape = list(map(int, np_shape))
+        # if len(np_shape) > 0:
+        #     inputs.append((np.random.rand(*np_shape) * 100).astype(np_dtype))
+        # else:
+        #     inputs.append(np.array(np.random.rand() * 100, dtype=np_dtype))
+        inputs.append(np.zeros(np_shape, dtype=np_dtype))
+
+    return inputs

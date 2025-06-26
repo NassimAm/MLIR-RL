@@ -1,8 +1,6 @@
 import multiprocessing.managers
 from aas import config as cfg
-from aas.observation.benchmark import BenchmarkFeatures, extract_bench_features_from_file, extract_bench_features_from_code
-from aas.observation.operation import extract_op_features_from_code
-from aas.transforms import transform_dialect_img2col
+from aas.observation.benchmark import BenchmarkFeatures, extract_bench_features_from_file
 from aas.state import OperationState
 from aas.agent import AlphaAutoScheduler
 from aas.wrappers import AASNetworkEstimation
@@ -19,6 +17,7 @@ from utils.log import print_info, print_alert, print_success, print_error, FileL
 import torch
 import multiprocessing
 import time
+from copy import deepcopy
 
 # To avoid leaking file descriptors when using multiprocessing
 # https://github.com/pytorch/pytorch/issues/973#issuecomment-604473515
@@ -34,21 +33,24 @@ class AASOpEnv:
     """List that contains all benchmarks features."""
     tmp_file_path: str
     """The temporary file to store the intermediate representations."""
+    is_training: bool
+    """Flag indicating if the environment is in training mode or evaluation mode."""
 
-    def __init__(self, tmp_file_path: Optional[str] = None):
+    def __init__(self, is_training: bool = True, tmp_file_path: Optional[str] = None):
         """Initialize the environment.
 
         Args:
             tmp_file_path (Optional[str]): The temporary file to store the intermediate representations. Defaults to None.
         """
+        self.is_training = is_training
+
         # Generate a random file to be used in order to apply the transformations and evaluate the code
-        # This is done in order to enable having multiple experiments at the same time, by letting each
-        # experiment use a separate unique file to read and write intermediate representations
         if tmp_file_path is None:
             random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
-            tmp_file_path = os.path.join('tmp', f'{random_str}.mlir')
+            tmp_file_path = f"tmp-debug/{random_str}.mlir" if cfg.debug else f"tmp/{random_str}.mlir"
         with open(tmp_file_path, "w") as file:
             file.write("")
+        os.makedirs(tmp_file_path.replace(".mlir", ""), exist_ok=True)
         self.tmp_file_path = tmp_file_path
 
         # Get execution database path or generate a new one
@@ -58,48 +60,32 @@ class AASOpEnv:
             with open(cfg.exec_db_path, "w") as file:
                 file.write("{}")
 
-        # Get benchmarks data
-        self.benchmarks_data = []
-        if cfg.data_format == "mlir":
-            # Load execution times from json file
-            with open(cfg.json_file, "r") as file:
-                benchmarks_json: dict[str, float] = json.load(file)
-            # Build benchmark features
-            for bench_name, exec_time in benchmarks_json.items():
-                bench_file = os.path.join(cfg.benchmarks_folder_path, bench_name + ".mlir")
-                benchmark_data = extract_bench_features_from_file(bench_name, bench_file, exec_time)
-                self.benchmarks_data.append(benchmark_data)
-        else:
-            # Load operations data from json file
-            with open(cfg.json_file, "r") as file:
-                json_data = json.load(file)
-            operation_filter = [
-                'linalg.matmul',
-                'linalg.conv_2d',
-                # 'pooling',
-                # 'generic',
-                'linalg.add',
-            ]
-            json_data = {op: details for op, details in json_data.items() if any([s in op for s in operation_filter])}
-            json_data = [(op, details) for op, details in json_data.items()]
+        # Load benchmark names and execution times from json file
+        bench_json_file = cfg.json_file
 
-            # Get the AST of the MLIR code and give a tag to each linalg operation
-            # The last operation represents the operations that we want to optimize (the first operations are just linalg.fills)
-            for i in tqdm(range(len(json_data)), desc='Loading benchmarks'):
-                # Get full MLIR code and execution time
-                code = json_data[i][1]["transform_wrapped_operation"]
-                exec_time = json_data[i][1]["execution_time"]
-                # Build benchmark features
-                bench_name = json_data[i][0]
-                benchmark_data = extract_bench_features_from_code(bench_name, code, exec_time)
-                # Apply Img2Col transformation to conv_2d operations
-                for op_tag, op_features in benchmark_data.operations.items():
-                    if op_features.operation_type == 'conv_2d':
-                        new_code = transform_dialect_img2col(benchmark_data.code, op_tag, self.tmp_file_path)
-                        new_operation_features = extract_op_features_from_code(new_code, op_tag)
-                        new_operation_features.operation_type = 'conv_2d+img2col'
-                        benchmark_data.operations[op_tag] = new_operation_features
-                        benchmark_data.code = new_code
+        # If we are in evaluation mode, use the evaluation json file if provided
+        if cfg.eval_json_file and not is_training:
+            bench_json_file = cfg.eval_json_file
+
+        with open(bench_json_file) as file:
+            benchmarks_json: dict[str, int] = json.load(file)
+
+        # Build benchmark features
+        self.benchmarks_data = []
+        for bench_name, root_exec_time in tqdm(benchmarks_json.items(), desc="Extracting benchmark features", unit="bench"):
+            bench_file = os.path.join(cfg.benchmarks_folder_path, bench_name + ".mlir")
+            benchmark_data = extract_bench_features_from_file(bench_name, bench_file, root_exec_time)
+
+            if cfg.split_ops and is_training and len(benchmark_data.operation_tags) > 1:
+                # Split benchmarks with more than one operation into multiple benchmarks
+                for tag in benchmark_data.operation_tags:
+                    # Create a new benchmark data with only the current operation
+                    new_bench_data = deepcopy(benchmark_data)
+                    new_bench_data.bench_name = f"{benchmark_data.bench_name}_{tag}"
+                    new_bench_data.operation_tags = [tag]
+                    new_bench_data.operations = {tag: new_bench_data.operations[tag]}
+                    self.benchmarks_data.append(new_bench_data)
+            else:
                 self.benchmarks_data.append(benchmark_data)
 
     def reset(self, idx: Optional[int] = None, mode: Literal['random', 'sequential'] = 'random'):
@@ -261,7 +247,7 @@ class AASTrainer:
         # Initialize the environment
         if env_type == "op":
             self.train_env = AASOpEnv()
-            self.eval_env = AASOpEnv()
+            self.eval_env = AASOpEnv(is_training=False)
         else:
             raise ValueError(f"Invalid environment type ({env_type}). Please choose 'op' for operation-wise optimization.")
         # Initialize agents
@@ -379,8 +365,6 @@ class AASTrainer:
                 self.file_logger.extend('train/value_loss', train_stats.value_loss)
                 for j in range(cfg.max_num_loops):
                     self.file_logger.extend(f'train/parallel_params_loss_{j}', train_stats.parallel_params_loss[j])
-                self.file_logger.extend('train/selection_entropy', train_stats.selection_entropy)
-                self.file_logger.extend('train/parallel_entropy', train_stats.parallel_params_entropy)
             train_end_time = time.time()
             train_duration = train_end_time - train_start_time
             if cfg.logging:
@@ -388,7 +372,7 @@ class AASTrainer:
             print_info(f"Training ended in {train_duration} s ...")
 
             # ================ Evaluate the agent without MCTS =====================
-            if i % 5 == 0:
+            if i > 0 and i % 100 == 0:
                 print_info("Started evaluation ...")
                 eval_start_time = time.time()
                 eval_speedups = self.eval_env.eval(self.agent, mode='greedy')

@@ -43,22 +43,34 @@ def transform_dialect_TP(code: str, operation_tag: str, tiling_size: list[int], 
     else:
         parallel_transform_dialect_code = ''
 
-    # Set tiling only for reduction loops
-    only_tiling_sizes = [tiling_size[i] if nested_loops_features[i].iterator_type == "reduction" else 0 for i in range(len(tiling_size))]
-    if any([a != 0 for a in only_tiling_sizes]):
-        only_tiling_transform_dialect_code = (
-            f'    %reduction_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-            f'    %reduction_tiled_{operation_tag}, %loops_{operation_tag} = transform.structured.tile_using_for %reduction_{operation_tag} tile_sizes {str(only_tiling_sizes)} : (!transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
-        )
+    reduction_tiling_sizes = [tiling_size[i] if nested_loops_features[i].iterator_type == "reduction" else 0 for i in range(len(tiling_size))]
+    reduction_loop_sizes = [nested_loops_features[i].upper_bound - nested_loops_features[i].lower_bound if nested_loops_features[i].iterator_type == "reduction" else 0 for i in range(len(nested_loops_features))]
+    if cfg.parallelize_reduction:
+        # Set tiling with parallelization for reduction loops
+        if any([a != 0 for a in reduction_tiling_sizes]):
+            reduction_transform_dialect_code = (
+                f'    %reduction_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+                f'    %reduction_fill_{operation_tag}, %reduction_tiled_{operation_tag}, %reduction_comb_{operation_tag}, %reduction_forall_{operation_tag} = transform.structured.tile_reduction_using_forall %reduction_{operation_tag} by num_threads = {str([loop_size // tile_size if loop_size > 0 else 0 for loop_size, tile_size in zip(reduction_loop_sizes, reduction_tiling_sizes)])}, tile_sizes = [] : (!transform.any_op) -> (!transform.any_op, !transform.any_op, !transform.any_op, !transform.any_op)\n'
+            )
+        else:
+            reduction_transform_dialect_code = ''
     else:
-        only_tiling_transform_dialect_code = ''
+        # Set tiling only for reduction loops
+        nb_reduction_loops = sum([s != 0 for s in reduction_tiling_sizes])
+        if nb_reduction_loops > 0:
+            reduction_transform_dialect_code = (
+                f'    %reduction_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+                f'    %reduction_tiled_{operation_tag}, %loops_{operation_tag}{f':{nb_reduction_loops}' if nb_reduction_loops > 1 else ''} = transform.structured.tile_using_for %reduction_{operation_tag} tile_sizes {str(reduction_tiling_sizes)} : (!transform.any_op) -> (!transform.any_op{', !transform.any_op' * nb_reduction_loops})\n'
+            )
+        else:
+            reduction_transform_dialect_code = ''
 
     # Add full transform dialect code into the main code
     transform_dialect_code = (
         f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
         f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
         f'{parallel_transform_dialect_code}'
-        f'{only_tiling_transform_dialect_code}'
+        f'{reduction_transform_dialect_code}'
         f'    transform.yield\n'
         f'  }}\n'
         f'}}'
@@ -498,7 +510,10 @@ def apply_transformation(state: OperationState, code: str, tmp_file_path: str, a
 
         # If the operation isn't small enough for vectorization, ignore the transformation
         if not Vectorization.is_possible(operation_features):
-            print_alert(f"REASON: Too large to vectorize {operation_features.op_iter_space_size} > {cfg.vect_size_limit}")
+            if operation_features.op_iter_space_size > cfg.vect_size_limit:
+                print_alert(f"REASON: Too large to vectorize {operation_features.op_iter_space_size} > {cfg.vect_size_limit}")
+            else:
+                print_alert("REASON: Operation is not vectorizable")
             return ''
 
         # # For convolution, before vectorization, we need to first apply another tiling in order to decompose it to 1d convolution
