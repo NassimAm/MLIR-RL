@@ -1,7 +1,7 @@
 from aas import config as cfg
 from aas.node import Node
 from aas.nn import AASNetwork
-from aas.action import Action, Parallelization, Vectorization, NoTransformation
+from aas.action import Action, Parallelization, Vectorization, NoTransformation, ParameterizedAction
 from aas.state import OperationState
 import torch
 from utils.torch_utils import sample_from_dist
@@ -29,11 +29,12 @@ class AASNetworkPolicyEstimation:
         self.parallel_params_probs = parallel_params_probs
         self.is_no_action = False
 
-    def get_action_from_hierarchical_probs(self, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
+    def get_action_from_hierarchical_probs(self, mode: Literal['greedy', 'stochastic'] = 'stochastic', params_mask: Optional[list[bool]] = None):
         """Get the action selected in a hierarchical manner given the estimation.
 
         Args:
             mode (Literal['greedy', 'stochastic']): The mode to select the action. Defaults to 'stochastic'.
+            params_mask (Optional[list[bool]]): A mask that specifies is each parameter should be set or not. Defaults to None.
 
         Returns:
             Action: The selected action."""
@@ -45,14 +46,32 @@ class AASNetworkPolicyEstimation:
                 # Get tile sizes for parallelization
                 tile_sizes = []
                 for i in range(cfg.max_num_loops):
-                    param_id = sample_from_dist(self.parallel_params_probs[i]) if mode == 'stochastic' else torch.argmax(self.parallel_params_probs[i]).item()
-                    tile_size = Parallelization.get_tile_size(param_id)
+                    if params_mask is not None and not params_mask[i]:
+                        # If the parameter is masked, set it to None
+                        tile_size = None
+                    else:
+                        # Sample tile size from the parallelization parameters probabilities
+                        param_id = sample_from_dist(self.parallel_params_probs[i]) if mode == 'stochastic' else torch.argmax(self.parallel_params_probs[i]).item()
+                        tile_size = Parallelization.get_tile_size(param_id)
+                    # Append the tile size to the list
                     tile_sizes.append(tile_size)
                 return Parallelization(tile_sizes)
             elif select_id == Vectorization.ID:
                 return Vectorization()
             else:
                 return NoTransformation()
+
+    def cumulate_with(self, other: 'AASNetworkPolicyEstimation'):
+        """Cumulate the current policy estimation with another one.
+
+        Args:
+            other (AASNetworkPolicyEstimation): The other policy estimation to cumulate with.
+        """
+        with torch.no_grad():
+            # Cumulate parallelization parameters probabilities
+            self.parallel_params_probs += other.parallel_params_probs
+            # Correct the probabilities to avoid overflow
+            self.parallel_params_probs = torch.where(self.parallel_params_probs > 1.0, self.parallel_params_probs - 1.0, self.parallel_params_probs)
 
     def no_action_estimation():
         """Get the AAS network policy estimation for no transformation action.
@@ -280,8 +299,9 @@ class AASNetworkWrapper:
         if isinstance(action, Parallelization):
             action_prob = aas_policy_estimation.select_probs[Parallelization.ID].item()
             for i, param in enumerate(action.params):
-                param_idx = Parallelization.get_param_id(param)
-                action_prob *= aas_policy_estimation.parallel_params_probs[i, param_idx].item()
+                if param is not None:
+                    param_idx = Parallelization.get_param_id(param)
+                    action_prob *= aas_policy_estimation.parallel_params_probs[i, param_idx].item()
         elif isinstance(action, Vectorization):
             action_prob = aas_policy_estimation.select_probs[Vectorization.ID].item()
         elif isinstance(action, NoTransformation):
@@ -477,10 +497,13 @@ class AASNetworkWrapper:
             # The dict would have string representation of the action taken from root to get to that node as a key
             # and the chid node as a value
             children_dict = {}
+            params_mask: Optional[list[bool]] = None
             # For each child node get the latest action and its MCTS probability
             for i, child in enumerate(root.children):
                 child_action = child.state.transformation_history[-1]
                 child_p = child.nb_visits ** (1 / temperature) / denominator
+                if params_mask is None and isinstance(child_action, ParameterizedAction):
+                    params_mask = [param is not None for param in child_action.params]
                 # Save child in dict
                 children_dict[str(child_action)] = child
                 # Put the probability in the right place in the probability tensor
@@ -489,8 +512,9 @@ class AASNetworkWrapper:
                     parallel_prob += child_p
                     # For parallelization, the marginal probability is calculated instead of using MCTS joint probability over tiling sizes
                     for j, param in enumerate(child_action.params):
-                        param_idx = Parallelization.get_param_id(param)
-                        parallel_params_probs[j, param_idx] += child_p
+                        if param is not None:
+                            param_idx = Parallelization.get_param_id(param)
+                            parallel_params_probs[j, param_idx] += child_p
                 elif isinstance(child_action, Vectorization):
                     select_probs[Vectorization.ID] = child_p
                 elif isinstance(child_action, NoTransformation):
@@ -513,7 +537,7 @@ class AASNetworkWrapper:
             parallel_params_probs=parallel_params_probs
         )
         # Get the child node with the highest MCTS probability
-        max_prob_action = aas_policy_estimation.get_action_from_hierarchical_probs(mode=mode)
+        max_prob_action = aas_policy_estimation.get_action_from_hierarchical_probs(mode=mode, params_mask=params_mask)
         selected_node = children_dict[str(max_prob_action)]
         # Return results
         return aas_policy_estimation, selected_node

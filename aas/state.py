@@ -1,7 +1,7 @@
 from aas import config as cfg
 from aas.observation.operation import OperationFeatures, formula_str_to_list
 from aas.observation.benchmark import BenchmarkFeatures
-from aas.action import Action, Parallelization, Vectorization, NoTransformation
+from aas.action import Action, Parallelization, Vectorization, NoTransformation, ParameterizedAction
 import torch
 import math
 
@@ -118,9 +118,16 @@ class OperationState:
             parallelization_history = torch.zeros((cfg.max_num_loops, cfg.num_tile_sizes + 1))
             for action in self.transformation_history:
                 if isinstance(action, Parallelization):
-                    for i, param in enumerate(action.params):
-                        idx = Parallelization.get_param_id(param)
-                        parallelization_history[i, idx] = 1
+                    for i in range(cfg.max_num_loops):
+                        param = action.params[i]
+                        if param is None:
+                            assert i < len(self.operation_features.nested_loops), "Parallelization parameter for a loop level that excedes the number of loops for an operation cannot be unknown (None)."
+                            param_ids = [Parallelization.get_param_id(tile_size) for tile_size in Parallelization.get_tiling_candidates(self.operation_features, loop_id=i)]
+                            for j in param_ids:
+                                parallelization_history[i, j] = 1 / len(param_ids)
+                        else:
+                            idx = Parallelization.get_param_id(param)
+                            parallelization_history[i, idx] = 1
             # Reshape tensors if needed
             nested_loops = nested_loops.reshape(-1)
             load_access_matrices = load_access_matrices.reshape(-1)
@@ -153,12 +160,24 @@ class OperationState:
         """
         if self.is_terminal():
             raise ValueError("Cannot apply action to terminal state.")
+        last_action = self.transformation_history[-1] if self.transformation_history else None
+        if last_action is not None and not action.is_root:
+            if isinstance(last_action, ParameterizedAction) and isinstance(action, ParameterizedAction):
+                step_count = self.step_count
+                new_transformation_history = self.transformation_history.copy()
+                new_transformation_history[-1] = action
+            else:
+                raise ValueError("Cannot apply non-root action while that action or the previous action is not parameterized.")
+        else:
+            step_count = self.step_count + 1
+            new_transformation_history = self.transformation_history + [action]
+
         return OperationState(
             bench_features=self.bench_features,
             operation_tag=self.operation_tag,
             operation_features=self.operation_features,
-            step_count=self.step_count + 1,
-            transformation_history=self.transformation_history + [action]
+            step_count=step_count,
+            transformation_history=new_transformation_history
         )
 
     def is_terminal(self):
@@ -175,7 +194,7 @@ class OperationState:
             # If parallelization is already applied and vectorization is not possible, the state is terminal
             parallel_action = next(action for action in self.transformation_history if isinstance(action, Parallelization))
             new_op_features = parallel_action.update_op_features(self.operation_features)
-            return not Vectorization.is_possible(new_op_features)
+            return not any([param is None for param in parallel_action.params]) and not Vectorization.is_possible(new_op_features)
         # Otherwise, the state is not terminal
         return False
 

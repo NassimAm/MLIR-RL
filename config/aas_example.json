@@ -12,6 +12,7 @@
     "mcts_max_nb_children": -1,
     "mcts_nb_iterations": 1600,
     "mcts_c_puct": 1.0,
+    "mcts_hierarchical": false,
     "max_num_stores_loads": 7,
     "max_num_loops": 7,
     "max_num_load_store_dim": 7,
@@ -27,6 +28,7 @@
     "benchmarks_folder_path": "",
     "json_file": "data/nn/train_operations.json",
     "exec_db_path": "",
+    "use_cache": true,
     "tags": ["aas", "nn", "no prior", "old expansion"],
     "logging": true
 }

@@ -183,6 +183,8 @@ class AASConfig(metaclass=Singleton):
     """The number of MCTS iterations"""
     mcts_c_puct: float
     """The PUCT constant for MCTS"""
+    mcts_hierarchical: bool
+    """Flag to enable hierarchical MCTS space"""
     # MLIR code features configuration ==============================
     max_num_stores_loads: int
     """The maximum number of loads in the nested loops"""
@@ -219,6 +221,8 @@ class AASConfig(metaclass=Singleton):
     """Flag to enable splitting benchmarks that have more than one operation into multiple single operation benchmarks."""
     exec_db_path: str
     """Path to the execution database file."""
+    use_cache: bool
+    """Flag to enable using the execution database cache. If False, all codes are executed to get their execution times."""
     # Neptune configuration =========================================
     tags: list[str]
     """List of tags to add to the neptune experiment"""
@@ -245,6 +249,7 @@ class AASConfig(metaclass=Singleton):
         self.mcts_max_nb_children = -1
         self.mcts_nb_iterations = 1000
         self.mcts_c_puct = 1.0
+        self.mcts_hierarchical = False
         self.max_num_stores_loads = 7
         self.max_num_loops = 7
         self.max_num_load_store_dim = 7
@@ -259,6 +264,7 @@ class AASConfig(metaclass=Singleton):
         self.optimization_mode = "last"
         self.benchmarks_folder_path = ""
         self.exec_db_path = ""
+        self.use_cache = True
         self.json_file = ""
         self.eval_json_file = ""
         self.split_ops = True
@@ -292,6 +298,7 @@ class AASConfig(metaclass=Singleton):
         self.mcts_max_nb_children = config["mcts_max_nb_children"]
         self.mcts_nb_iterations = config["mcts_nb_iterations"]
         self.mcts_c_puct = config["mcts_c_puct"]
+        self.mcts_hierarchical = config["mcts_hierarchical"]
         self.max_num_stores_loads = config["max_num_stores_loads"]
         self.max_num_loops = config["max_num_loops"]
         self.max_num_load_store_dim = config["max_num_load_store_dim"]
@@ -309,6 +316,7 @@ class AASConfig(metaclass=Singleton):
         self.eval_json_file = config["eval_json_file"]
         self.split_ops = config["split_ops"]
         self.exec_db_path = config["exec_db_path"]
+        self.use_cache = config["use_cache"]
         self.tags = config["tags"]
         self.logging = config["logging"]
         self.debug = config["debug"]
@@ -336,6 +344,7 @@ class AASConfig(metaclass=Singleton):
             "mcts_max_nb_children": self.mcts_max_nb_children,
             "mcts_nb_iterations": self.mcts_nb_iterations,
             "mcts_c_puct": self.mcts_c_puct,
+            "mcts_hierarchical": self.mcts_hierarchical,
             "max_num_stores_loads": self.max_num_stores_loads,
             "max_num_loops": self.max_num_loops,
             "max_num_load_store_dim": self.max_num_load_store_dim,
@@ -353,6 +362,7 @@ class AASConfig(metaclass=Singleton):
             "eval_json_file": self.eval_json_file,
             "split_ops": self.split_ops,
             "exec_db_path": self.exec_db_path,
+            "use_cache": self.use_cache,
             "tags": self.tags,
             "logging": self.logging,
             "debug": self.debug

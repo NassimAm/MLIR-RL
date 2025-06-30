@@ -2,7 +2,7 @@ from aas import config as cfg
 from aas.nn import AASNetwork
 from aas.wrappers import AASNetworkWrapper, AASNetworkPolicyEstimation, AASNetworkEstimation
 from aas.node import Node
-from aas.mcts import MCTS
+from aas.mcts import MCTS, MCTSVisualizer
 from aas.state import OperationState
 from typing import Optional, Callable, Literal, Iterable
 from copy import deepcopy
@@ -43,13 +43,14 @@ class AlphaAutoScheduler:
         """
         self.action_temperature = temperature
 
-    def run(self, state: OperationState, exec_db: Optional[dict] = None, mode: Literal['greedy', 'stochastic'] = 'stochastic'):
+    def run(self, state: OperationState, exec_db: Optional[dict] = None, mode: Literal['greedy', 'stochastic'] = 'stochastic', display_tree: bool = False):
         """Run the Alpha AutoScheduler on a given state and return training data about the trajectory taken by the agent.
 
         Args:
             state (OperationState): The initial operation state to optimize.
             exec_db (Optional[dict], optional): The benchmark execution database to use. Defaults to None.
             mode (Literal['greedy', 'stochastic'], optional): The mode to run the agent. Defaults to 'stochastic'.
+            display_tree (bool, optional): Whether to display the MCTS tree. Defaults to False.
 
         Returns:
             list[tuple[OperationState, AASNetworkPolicyEstimation]]: The trajectory taken by the agent.
@@ -66,19 +67,24 @@ class AlphaAutoScheduler:
         while not node.is_terminal():
             # Get MCTS policy target
             target_policy_estimation, next_node = mcts.run(node, n_iterations=cfg.mcts_nb_iterations, exec_db=exec_db, mode=mode)
-            # max_q_child = max([child for child in node.children], key=lambda x: x.q, default=None)
-            # max_nb_visits_child = max([child for child in node.children], key=lambda x: x.nb_visits, default=None)
-            # print(node.state.operation_tag, "Max Q", max_q_child.to_str(mcts.min_value, mcts.max_value, mcts.c_puct) if max_q_child is not None else None)
-            # print(node.state.operation_tag, "Fisrt child", node.children[0].to_str(mcts.min_value, mcts.max_value, mcts.c_puct) if len(node.children) > 0 else None)
-            # print(node.state.operation_tag, "Max nb visits", max_nb_visits_child.to_str(mcts.min_value, mcts.max_value, mcts.c_puct))
             # Save the current state and the target policy estimation and set value to 0 for now
-            trajectory.append((node.state, target_policy_estimation))
+            new_action = next_node.state.transformation_history[-1]
+            if not new_action.is_root:
+                # If the new action is not a root action, cumulate the target policy estimation with the last known root action target policy estimation
+                assert len(trajectory) > 0, "If the new action is not a root action, the trajectory shouldn't be empty."
+                trajectory[-1][1].cumulate_with(target_policy_estimation)
+            else:
+                # If the new action is a root action, add its data to the trajectory
+                trajectory.append((node.state, target_policy_estimation))
             # Make the next node the root node
             next_node.node_exploration_factor = 1.0
             next_node.parent = None
             node = next_node
         # Add the terminal node to the trajectory
         trajectory.append((node.state, self.network_wrapper.get_no_action_aas_policy_estimation()))
+        # Display MCTS tree for debugging purposes if required
+        if display_tree:
+            MCTSVisualizer().display_tree(root, 'images/mcts_tree')
         # Return the trajectory
         return trajectory
 
@@ -140,7 +146,7 @@ class AlphaAutoScheduler:
         """
         torch.save(self.network.state_dict(), path)
 
-    def load_from_file(path: str, reward_func: Callable[[OperationState, int], float]):
+    def load_from_file(path: str, reward_func: Callable[[OperationState, int], float]) -> 'AlphaAutoScheduler':
         """Load the Alpha AutoScheduler from a file.
 
         Args:

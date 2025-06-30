@@ -1,5 +1,7 @@
 from utils.log import NeptuneLogger
 import argparse
+from dotenv import load_dotenv
+load_dotenv(override=True)
 
 # Get arg from command line
 parser = argparse.ArgumentParser()

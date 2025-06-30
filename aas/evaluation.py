@@ -41,6 +41,7 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
         },
 
         convert-linalg-to-loops,
+        canonicalize,
         buffer-deallocation-pipeline,
         convert-bufferization-to-memref,
         scf-forall-to-parallel,

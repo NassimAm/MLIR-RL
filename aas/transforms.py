@@ -11,19 +11,19 @@ from typing import Optional
 
 # ====================================== Transform dialect functions ======================================
 
-def transform_dialect_TP(code: str, operation_tag: str, tiling_size: list[int], nested_loops_features: list[NestedLoopFeatures], tmp_file_path: str):
+def transform_dialect_TP(code: str, operation_tag: str, tiling_size: list[Optional[int]], nested_loops_features: list[NestedLoopFeatures], tmp_file_path: str):
     """Apply the tiling and parallelization transformation to the specified operation in the given code.
 
     Args:
         code (str): The code to apply the transformation to.
         operation_tag (str): The tag of the operation to apply the transformation to.
-        tiling_size (list[int]): The tiling size to apply.
+        tiling_size (list[Optional[int]]): The tiling size to apply.
         tmp_file_path (str): The path to the temporary file to write the code to.
 
     Returns:
         str: The code after applying the transformation.
     """
-    if not tiling_size:
+    if not tiling_size or None in tiling_size:
         return ''
     # Crop tiling sizes to the number of loops
     tiling_size = tiling_size[:len(nested_loops_features)]
@@ -308,8 +308,8 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
     return result
 
 
-def transform_dialect_vectorise(code: str, operation_tag: str, tmp_file_path: str):
-    """Apply the vectorization transformation to the specified operation in the given code.
+def transform_dialect_vectorize(code: str, operation_tag: str, tmp_file_path: str):
+    """Apply the vectorization transformation with vectorizer to the specified operation in the given code.
 
     Args:
         code (str): The code to apply the transformation to.
@@ -319,35 +319,44 @@ def transform_dialect_vectorise(code: str, operation_tag: str, tmp_file_path: st
     Returns:
         str: The code after applying the transformation.
     """
+    if not code:
+        return code
 
     code = code.strip()
 
     transform_dialect_code = f"""
-module attributes {{transform.with_named_sequence}} {{
-transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{transform.readonly}})
-{{
+    module attributes {{transform.with_named_sequence}} {{
+        transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{transform.readonly}}) {{
+            %op_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %variant_op : (!transform.any_op) -> !transform.any_op
+            transform.structured.vectorize %op_{operation_tag} : !transform.any_op
 
-  // %conv_gen_2 = transform.structured.match attributes{{tag = "{operation_tag}"}} in %variant_op : (!transform.any_op) -> !transform.any_op
-  // %forall_op = transform.get_parent_op %conv_gen_2: (!transform.any_op) -> !transform.any_op
+            %f = transform.structured.match ops{{[\"func.func\"]}} in %variant_op : (!transform.any_op) -> !transform.any_op
+            transform.apply_patterns to %f {{
+                transform.apply_patterns.vector.transfer_permutation_patterns
+                transform.apply_patterns.vector.reduction_to_contract
+                transform.apply_patterns.canonicalization
+                transform.apply_patterns.tensor.fold_tensor_subset_ops_into_vector_transfers
+            }} : !transform.any_op
 
-  %forall_op = transform.structured.match ops{{["scf.forall"]}}  in %variant_op : (!transform.any_op) -> !transform.any_op
+            transform.apply_patterns to %f {{
+                transform.apply_patterns.vector.lower_contraction lowering_strategy = "outerproduct"
+                transform.apply_patterns.vector.transfer_permutation_patterns
+                transform.apply_patterns.vector.lower_multi_reduction lowering_strategy = "innerparallel"
+                transform.apply_patterns.vector.split_transfer_full_partial split_transfer_strategy = "vector-transfer"
+                transform.apply_patterns.vector.transfer_to_scf max_transfer_rank = 1 full_unroll = true
+                transform.apply_patterns.vector.lower_transfer max_transfer_rank = 1
+                transform.apply_patterns.vector.lower_shape_cast
+                transform.apply_patterns.vector.lower_transpose lowering_strategy = "shuffle_1d"
+                transform.apply_patterns.canonicalization
+            }} : !transform.any_op
+            transform.yield
+        }}
+    }}""".strip()
 
-
-  %original_fill = transform.structured.match ops{{["linalg.fill"]}} in %variant_op : (!transform.any_op) -> !transform.any_op
-  transform.structured.fuse_into_containing_op %original_fill into %forall_op : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)
-
-  %func = transform.structured.match ops{{["func.func"]}} in %variant_op: (!transform.any_op) -> !transform.any_op
-  %func_0 = transform.structured.vectorize_children_and_apply_patterns %func {{vectorize_padding}}: (!transform.any_op) -> (!transform.any_op)
-
-  transform.yield
-}}
-}}
-""".strip()
-
-    code = code + '\n' + transform_dialect_code + '\n'
+    full_code = code + '\n' + transform_dialect_code + '\n'
 
     with open(tmp_file_path, "w") as file:
-        file.write(code)
+        file.write(full_code)
 
     result = os.popen(
         f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
@@ -547,7 +556,7 @@ def apply_transformation(state: OperationState, code: str, tmp_file_path: str, a
         elif state.operation_features.operation_type == 'conv_2d+img2col':
             new_code = transform_dialect_vectorise_img2col(code, state.operation_tag, tmp_file_path)
         else:
-            new_code = transform_dialect_vectorise(code, state.operation_tag, tmp_file_path)
+            new_code = transform_dialect_vectorize(code, state.operation_tag, tmp_file_path)
     elif isinstance(action, NoTransformation):
         new_code = code
     else:

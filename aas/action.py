@@ -1,5 +1,6 @@
 from aas import config as cfg
 from aas.observation.operation import OperationFeatures
+from typing import Optional
 import math
 
 
@@ -9,6 +10,11 @@ class Action:
     """The ID of the transformation"""
     _name: str
     """The name of the transformation"""
+    is_root: bool
+    """Whether the action is a root action or not in a hiearchical action setting.
+    The root action is the first action with only one parameter set and other parameters are unknown.
+    It should be followed by the same action with one more different parameter set and so on until all parameters are set.
+    Default is True."""
 
     def __init__(self, id: int, name: str):
         """Initialize a new action.
@@ -19,6 +25,7 @@ class Action:
         """
         self._id = id
         self._name = name
+        self.is_root = True
 
     @property
     def id(self):
@@ -44,22 +51,24 @@ class Action:
 
 class ParameterizedAction(Action):
     """Class to represent a parameterized transformation as an agent action."""
-    params: list[int]
+    params: list[Optional[int]]
     """The parameters of the transformation"""
 
-    def __init__(self, id: int, name: str, params: list[int]):
+    def __init__(self, id: int, name: str, params: list[Optional[int]], is_root: bool = True):
         """Initialize a new parameterized action.
 
         Args:
             id (int): The ID of the transformation.
             name (str): The name of the transformation.
-            params (list[int]): The parameters of the transformation.
+            params (list[Optional[int]]): The parameters of the transformation.
+            is_root (bool): Whether the action is a root action or not. Defaults to True.
         """
         super().__init__(id, name)
         self.params = params
+        self.is_root = is_root
 
     def __repr__(self):
-        return f'{self.name}({', '.join([str(e) for e in self.params])})'
+        return f'{self.name}({', '.join([str(e) if e is not None else '-' for e in self.params])})'
 
 
 class Parallelization(ParameterizedAction):
@@ -70,13 +79,14 @@ class Parallelization(ParameterizedAction):
     ID = 0
     """The ID of the parallelization transformation"""
 
-    def __init__(self, params: list[int]):
+    def __init__(self, params: list[Optional[int]], is_root: bool = True):
         """Initialize a new parallelization action.
 
         Args:
-            params (list[int]): The parameters of the transformation.
+            params (list[Optional[int]]): The parameters of the transformation.
+            is_root (bool): Whether the action is a root action or not. Defaults to True.
         """
-        super().__init__(Parallelization.ID, Parallelization.DEFAULT_NAME, params)
+        super().__init__(Parallelization.ID, Parallelization.DEFAULT_NAME, params, is_root=is_root)
 
     def get_param_id(tile_size: int):
         """Get the ID of the tile size.
@@ -117,17 +127,20 @@ class Parallelization(ParameterizedAction):
             sub_candidates = Parallelization.generate_tiling_combinations(candidates[1:])
             return [[candidate] + sub_candidate for candidate in candidates[0] for sub_candidate in sub_candidates]
 
-    def get_tiling_candidates(operation_features: OperationFeatures):
+    def get_tiling_candidates(operation_features: OperationFeatures, loop_id: Optional[int] = None):
         """Get the tiling candidates for the operation features.
 
         Args:
             operation_features (OperationFeatures): The operation features to get the tiling candidates from.
+            loop_id (Optional[int], optional): The loop ID to get the tiling candidates for. Defaults to None.
 
         Returns:
             list[list[int]]: The list of tiling candidates.
         """
+        start_id = loop_id if loop_id is not None else 0
+        end_id = loop_id + 1 if loop_id is not None else len(operation_features.nested_loops)
         candidates = []
-        for nested_loop in operation_features.nested_loops:
+        for nested_loop in operation_features.nested_loops[start_id:end_id]:
             # If upperbound equal 1, we only have candidates of 1
             if nested_loop.upper_bound == 1:
                 sub_candidates = [0, 1]
@@ -145,11 +158,13 @@ class Parallelization(ParameterizedAction):
                         sub_candidates.append(i)
                     i *= 2
             candidates.append(sub_candidates)
-        # Fill other loops with 0 as candidate
-        for _ in range(len(operation_features.nested_loops), cfg.max_num_loops):
-            candidates.append([0])
 
-        return candidates
+        # Fill other loops with 0 as candidate
+        if loop_id is None:
+            for _ in range(len(operation_features.nested_loops), cfg.max_num_loops):
+                candidates.append([0])
+
+        return candidates if loop_id is None else candidates[0]
 
     def update_op_features(self, operation_features: OperationFeatures):
         """Update the operation features with the tiling.
@@ -159,7 +174,7 @@ class Parallelization(ParameterizedAction):
         """
         op_iter_space_size = 1
         for i, nested_loop in enumerate(operation_features.nested_loops):
-            op_iter_space_size *= self.params[i] if self.params[i] != 0 else nested_loop.upper_bound
+            op_iter_space_size *= self.params[i] if self.params[i] else nested_loop.upper_bound
         return OperationFeatures(
             operation_type=operation_features.operation_type,
             op_count=operation_features.op_count,
@@ -224,13 +239,14 @@ class Tiling(ParameterizedAction):
     ID = 4
     """The ID of the tiling transformation"""
 
-    def __init__(self, params: list[int]):
+    def __init__(self, params: list[Optional[int]], is_root: bool = True):
         """Initialize a new tiling action.
 
         Args:
-            params (list[int]): The parameters of the transformation.
+            params (list[Optional[int]]): The parameters of the transformation.
+            is_root (bool): Whether the action is a root action or not. Defaults to True.
         """
-        super().__init__(Tiling.ID, Tiling.DEFAULT_NAME, params)
+        super().__init__(Tiling.ID, Tiling.DEFAULT_NAME, params, is_root=is_root)
 
     def get_param_id(tile_size: int):
         """Get the ID of the tile size.
@@ -313,7 +329,7 @@ class Tiling(ParameterizedAction):
         """
         op_iter_space_size = 1
         for i, nested_loop in enumerate(operation_features.nested_loops):
-            op_iter_space_size *= self.params[i] if self.params[i] != 0 else nested_loop.upper_bound
+            op_iter_space_size *= self.params[i] if self.params[i] else nested_loop.upper_bound
         return OperationFeatures(
             operation_type=operation_features.operation_type,
             op_count=operation_features.op_count,

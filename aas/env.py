@@ -24,6 +24,9 @@ from copy import deepcopy
 torch.multiprocessing.set_sharing_strategy('file_system')
 # Set the number of threads for torch
 torch.set_num_threads(4)
+# Set the random seed for reproducibility
+seed = 0
+torch.manual_seed(seed)
 
 
 class AASOpEnv:
@@ -50,11 +53,11 @@ class AASOpEnv:
             tmp_file_path = f"tmp-debug/{random_str}.mlir" if cfg.debug else f"tmp/{random_str}.mlir"
         with open(tmp_file_path, "w") as file:
             file.write("")
-        os.makedirs(tmp_file_path.replace(".mlir", ""), exist_ok=True)
+
         self.tmp_file_path = tmp_file_path
 
         # Get execution database path or generate a new one
-        if not cfg.exec_db_path:
+        if cfg.use_cache and not cfg.exec_db_path:
             random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
             cfg.exec_db_path = os.path.join('tmp', f'{random_str}.json')
             with open(cfg.exec_db_path, "w") as file:
@@ -128,12 +131,13 @@ class AASOpEnv:
         # Return that state
         return state
 
-    def step(self, state: OperationState, mode: Literal['random', 'sequential'] = 'random'):
+    def step(self, state: OperationState, mode: Literal['random', 'sequential'] = 'random', optimization_mode: Optional[Literal['all', 'last']] = None):
         """Take a step in the environment given an agent.
 
         Args:
             state (OperationState): The current state of the environment.
             mode (Literal['random', 'sequential']): The mode to select the next operation. Defaults to 'random'.
+            optimization_mode (Optional[Literal['all', 'last']]): The optimization mode to use. If None, defaults to cfg.optimization_mode.
 
         Returns:
             OperationState: The next state of the environment.
@@ -143,9 +147,13 @@ class AASOpEnv:
         # Get benchmark data
         bench_data = self.benchmarks_data[self.bench_index]
 
+        # Set optimization mode
+        if optimization_mode is None:
+            optimization_mode = cfg.optimization_mode
+
         # Indicates that the benchmark optimization is over or not
         terminated = True
-        if cfg.optimization_mode == "all":
+        if optimization_mode == "all":
             op_index = bench_data.operation_tags.index(state.operation_tag)
             if op_index > 0:
                 # Benchmark optimization is not over
@@ -202,16 +210,16 @@ class AASOpEnv:
                 # Save the last state in trajectory
                 optimized_states.append(optimized_state)
                 # Take a step in the environment
-                state, terminated = self.step(state, mode='sequential')
+                state, terminated = self.step(state, mode='sequential', optimization_mode='all')
             # Evaluate the transformed code
-            exec_time, assertion, _ = evaluate_benchmark_code_with_timeout(optimized_states, self.tmp_file_path)
+            exec_time, assertion, _ = evaluate_benchmark_code_with_timeout(optimized_states, self.tmp_file_path, use_cache=cfg.use_cache)
             # Calculate speedup
             bench_features = optimized_states[0].bench_features
             root_exec_time = bench_features.root_exec_time
             print_info(f"Evaluation ({i + 1}/{len(self.benchmarks_data)}): {bench_features.bench_name}")
             if exec_time is not None and assertion:
                 speedup = root_exec_time / exec_time
-                print_success(f"Schedule: {optimized_states[0].transformation_history} - {speedup}")
+                print_success(f"Schedule: {BenchmarkFeatures.any_schedule_to_str([s.transformation_history for s in optimized_states])} - {speedup}")
                 speedups.append(speedup)
         # Return the speedups
         return speedups
@@ -256,7 +264,7 @@ class AASTrainer:
         else:
             self.save_file_path = save_file_path
         self.agent = AlphaAutoScheduler(self.train_env.get_reward)
-        self.agent.save(self.save_file_path)
+        # self.agent.save(self.save_file_path)
         self.prev_agent = self.agent.copy()
         # Initialize data queue
         self.data = deque(maxlen=cfg.data_queue_max_length)
@@ -281,11 +289,12 @@ class AASTrainer:
             self.agent.set_temperature(1.0 if i < 500 else 0.5 if i < 750 else 0.25)
             # ======================== Gather training data ========================
             # Read execution database
-            if cfg.exec_db_path:
+            if cfg.use_cache and cfg.exec_db_path:
                 with open(cfg.exec_db_path, "r") as f:
                     exec_db = json.load(f)
             # Start MCTS searches
-            print_info("Started MCTS search ...")
+            nb_cpus = multiprocessing.cpu_count()
+            print_info(f"Started MCTS search on {nb_cpus} CPUs ...")
             mcts_start_time = time.time()
             # Clear the output list
             self.train_output_list[:] = []
@@ -296,7 +305,7 @@ class AASTrainer:
             # Run MCTS searches in parallel
             for id in range(cfg.nb_train_eps):
                 # Run the agent on the current state
-                process = multiprocessing.Process(target=self.agent.run_parallel, args=(id, self.train_output_list, (train_state, exec_db.get(train_state.bench_features.bench_name))))
+                process = multiprocessing.Process(target=self.agent.run_parallel, args=(id, self.train_output_list, (train_state, exec_db.get(train_state.bench_features.bench_name) if exec_db else None)))
                 process.start()
                 processes.append(process)
                 train_state, _ = self.train_env.step(train_state)
@@ -323,7 +332,7 @@ class AASTrainer:
                 # Get the last state of the trajectory
                 last_state, _ = trajectories[j][-1]
                 # Run the code with last state transformation list
-                exec_time, assertion, transformed_code = evaluate_code_with_timeout(last_state, self.train_env.tmp_file_path)
+                exec_time, assertion, transformed_code = evaluate_code_with_timeout(last_state, self.train_env.tmp_file_path, use_cache=cfg.use_cache)
                 # Add the trajectory to the data queue
                 if exec_time is not None and assertion:
                     # Get the reward
@@ -383,7 +392,7 @@ class AASTrainer:
                     self.file_logger.append('eval/average_speedup', avg_eval_speedup)
                     bench_names = [bench.bench_name for bench in self.eval_env.benchmarks_data]
                     for bench_name, eval_speedup in zip(bench_names, eval_speedups):
-                        self.file_logger.append(f'eval/{bench_name}', eval_speedup)
+                        self.file_logger.append(f'eval/speedup/{bench_name}', eval_speedup)
                 if cfg.pitting:
                     score = self.pit(eval_speedups, prev_eval_speedups)
                     if score >= 0:
@@ -426,7 +435,7 @@ class AASTrainer:
         # Return the score
         return score
 
-    def get_best_agent(self):
+    def get_best_agent(self) -> AlphaAutoScheduler:
         """Load the best agent so far.
 
         Returns:
