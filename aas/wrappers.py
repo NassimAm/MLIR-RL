@@ -193,6 +193,8 @@ class AASNetworkWrapper:
         # Gather data
         input_arr = []
         policy_mask_arr = []
+        select_mask_arr = []
+        parallel_loop_mask_arr = []
         parallel_params_mask_arr = []
         select_probs_target_arr = []
         parallel_params_probs_target_arr = []
@@ -202,7 +204,10 @@ class AASNetworkWrapper:
             input_arr.append(state.to_tensor())
             # Get masks
             policy_mask_arr.append(0.0 if target.policy.is_no_action_estimation() else 1.0)
-            parallel_params_mask_arr.append(self.get_action_mask(state, target.policy))
+            select_mask, parallel_loop_mask, parallel_params_mask = self.get_action_mask(state, target.policy)
+            select_mask_arr.append(select_mask)
+            parallel_loop_mask_arr.append(parallel_loop_mask)
+            parallel_params_mask_arr.append(parallel_params_mask)
             # Get target tensors
             select_probs_target_arr.append(target.policy.select_probs)
             parallel_params_probs_target_arr.append(target.policy.parallel_params_probs)
@@ -210,6 +215,8 @@ class AASNetworkWrapper:
         # Stack tensors
         input_tensors = torch.stack(input_arr)
         policy_mask = torch.tensor(policy_mask_arr)
+        select_mask = torch.stack(select_mask_arr)
+        parallel_loop_mask = torch.stack(parallel_loop_mask_arr)
         parallel_params_mask = torch.stack(parallel_params_mask_arr)
         select_probs_target = torch.stack(select_probs_target_arr)
         parallel_params_probs_target = torch.stack(parallel_params_probs_target_arr)
@@ -223,6 +230,8 @@ class AASNetworkWrapper:
             perm = torch.randperm(len(data))
             input_tensors = input_tensors[perm]
             policy_mask = policy_mask[perm]
+            select_mask = select_mask[perm]
+            parallel_loop_mask = parallel_loop_mask[perm]
             parallel_params_mask = parallel_params_mask[perm]
             select_probs_target = select_probs_target[perm]
             parallel_params_probs_target = parallel_params_probs_target[perm]
@@ -234,17 +243,22 @@ class AASNetworkWrapper:
                 batch_end = (j + 1) * cfg.batch_size
                 input_tensors_batch = input_tensors[batch_start:batch_end]
                 policy_mask_batch = policy_mask[batch_start:batch_end]
+                select_mask_batch = select_mask[batch_start:batch_end]
+                parallel_loop_mask_batch = parallel_loop_mask[batch_start:batch_end]
                 parallel_params_mask_batch = parallel_params_mask[batch_start:batch_end]
                 select_probs_target_batch = select_probs_target[batch_start:batch_end]
                 parallel_params_probs_target_batch = parallel_params_probs_target[batch_start:batch_end]
                 value_target_batch = value_target[batch_start:batch_end]
                 # Make a forward pass (train mode)
                 select_probs_logits, parallel_params_probs_logits, value_pred = self.model(input_tensors_batch)
+                # Mask logits
+                select_probs_logits[~select_mask_batch] = -10.0
+                parallel_params_probs_logits[~parallel_params_mask_batch] = -10.0
                 # Reset gradients
                 self.optimizer.zero_grad()
                 # Calculate losses
                 sl = torch.mean(self.ce_loss(select_probs_logits, select_probs_target_batch) * policy_mask_batch)
-                ppls = torch.concatenate([torch.mean(self.ce_loss(parallel_params_probs_logits[:, i, :], parallel_params_probs_target_batch[:, i, :]) * parallel_params_mask_batch[:, i]).unsqueeze(0) for i in range(cfg.max_num_loops)])
+                ppls = torch.concatenate([torch.mean(self.ce_loss(parallel_params_probs_logits[:, i, :], parallel_params_probs_target_batch[:, i, :]) * parallel_loop_mask_batch[:, i]).unsqueeze(0) for i in range(cfg.max_num_loops)])
                 vl = self.value_loss(value_pred, value_target_batch)
                 # Save losses for stats
                 if cfg.logging:
@@ -268,17 +282,44 @@ class AASNetworkWrapper:
         Returns:
             torch.Tensor: The mask for parallel tile sizes selection.
         """
+        # Set a mask for transformation selection
+        select_mask = torch.ones(cfg.num_transformations, dtype=torch.bool)
+        transformation_names = [action.name for action in state.transformation_history]
+        op_features = state.operation_features
+        parallelization_applied = Parallelization.DEFAULT_NAME in transformation_names
+        # If parallelization is already applied don't apply it again
+        if parallelization_applied:
+            parallel_action = next(action for action in state.transformation_history if isinstance(action, Parallelization))
+            op_features = parallel_action.update_op_features(state.operation_features)
+            select_mask[Parallelization.ID] = False
+        else:
+            select_mask[NoTransformation.ID] = False
+        # If vectorization is not possible, don't apply it
+        if not Vectorization.is_possible(op_features):
+            select_mask[Vectorization.ID] = False
+
         # Set a mask for loop tile sizes selection
-        parallel_params_mask = torch.zeros(cfg.max_num_loops)
+        parallel_loop_mask = torch.zeros(cfg.max_num_loops)
+        parallel_params_mask = torch.ones((cfg.max_num_loops, cfg.num_tile_sizes + 1), dtype=torch.bool)
         # If parallelization is not selected, return mask with zeros
         if policy.select_probs[Parallelization.ID] == 0:
-            return parallel_params_mask
+            return select_mask, parallel_loop_mask, parallel_params_mask
         else:  # Otherwise, mask loops which tile sizes are not needed
             nb_loops = len(state.operation_features.nested_loops)
             for i in range(cfg.max_num_loops):
-                parallel_params_mask[i] = 1 if i < nb_loops else 0
+                if i < nb_loops:
+                    parallel_loop_mask[i] = 1
+                    # Get the tile sizes candidates for the loop
+                    candidates = Parallelization.get_tiling_candidates(state.operation_features, loop_id=i)
+                    for j in range(cfg.num_tile_sizes + 1):
+                        tile_size = Parallelization.get_tile_size(j)
+                        if tile_size not in candidates:
+                            # If the tile size is not a candidate, mask it
+                            parallel_params_mask[i, j] = False
+                else:
+                    parallel_loop_mask[i] = 0
         # Return masks
-        return parallel_params_mask
+        return select_mask, parallel_loop_mask, parallel_params_mask
 
     def get_action_prob(self, node: Node, action: Action, aas_policy_estimation: Optional[AASNetworkPolicyEstimation] = None):
         """Get the probability of an action given the curent node and the AASNetwork estimation.
